@@ -109,3 +109,14 @@ Stuff I use for computing (and thus have learnt something about so far):
   - VDE could also be relevant, but currently out of scope
 - layer-2 VPN with tinc
 - `libguestfs` for analyzing and changing images
+
+
+## Contribution
+
+If you want to contribute you can:
+
+- create some steampunk artwork for this project :)
+- think about what else could be interesting to implement (especially if
+  it runs as a daemon it should be based on well-established Linux technology
+  that runs without babysitting it all day long)
+- create a routine for simple setup of the root installation steps
