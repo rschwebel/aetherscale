@@ -99,10 +99,10 @@ def main():
         print('Command does not exist', file=sys.stderr)
         sys.exit(1)
 
-    with ServerCommunication() as c:
-        result = c.send_msg(data, response_expected)
-        print(result)
-
-
-if __name__ == '__main__':
-    main()
+    try:
+        with ServerCommunication() as c:
+            result = c.send_msg(data, response_expected)
+            print(result)
+    except pika.exceptions.AMQPConnectionError:
+        print('Could not connect to AMQP broker. Is it running?',
+              file=sys.stderr)
