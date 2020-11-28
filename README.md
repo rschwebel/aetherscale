@@ -21,6 +21,34 @@ virtualenv venv && source venv/bin/activate
 pip install -e .
 ```
 
+Before you can start using the server you need to setup a TAP device to which
+VDE networking can connect. This is needed so that the started VMs can
+join the network. To be able to create a TAP device that is connected to your
+real network, you might also have to setup a software bridge. Below are all
+the steps, `$YOUR_USER` must be set to the user as which VDE and the
+aetherscale server should run.
+
+```
+# Create a bridge connected to the real ethernet device (eth0)
+ip link add br0 type bridge
+ip link set br0 up
+
+ip link set eth0 up
+ip link set eth0 master br0
+
+# Re-assign IP from eth0 to br0
+ip addr flush dev eth0
+
+# Assign IP to br0
+ip addr add 192.168.0.10/24 brd + dev br0
+ip route add default via 192.168.0.1 dev br0
+
+# Setup a TAP device to which VDE can connect
+ip tuntap add dev tap-vde mode tap user $YOUR_USER
+ip link set dev tap-vde up
+ip link set tap-vde master br0
+```
+
 ## Usage
 
 The server can be started with:
