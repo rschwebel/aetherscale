@@ -1,0 +1,8 @@
+base_images
+user_images
+
+build
+dist
+env
+__pycache__
+*.egg-info
