@@ -139,7 +139,8 @@ def callback(ch, method, properties, body):
                 f'tap,id=pubnet,ifname={tap_device},script=no,downscript=no'
 
         p = subprocess.Popen([
-            'qemu-system-x86_64', '-m', '4096', '-hda', str(user_image),
+            'qemu-system-x86_64', '-m', '4096', '-accel', 'kvm',
+            '-hda', str(user_image),
             '-device', f'virtio-net-pci,netdev=pubnet,mac={mac_addr}',
             '-netdev', netdev,
             '-name', f'qemu-vm-{vm_id},process=vm-{vm_id}',
