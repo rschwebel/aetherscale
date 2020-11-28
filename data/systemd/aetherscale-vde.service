@@ -1,0 +1,8 @@
+[Unit]
+Description=aetherscale VDE networking
+
+[Service]
+ExecStart=/usr/bin/vde_switch -tap tap-vde -s /tmp/vde.ctl
+
+[Install]
+WantedBy=default.target

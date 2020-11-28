@@ -1,3 +1,4 @@
+import logging
 import json
 import os
 from pathlib import Path
@@ -7,10 +8,19 @@ import random
 import string
 import subprocess
 import sys
+import time
 from typing import List, Optional
 
 from . import interfaces
+from . import execution
 
+# TODO: Since this is not a command line interface file anymore, switch to
+# logging from print
+
+# Non-VDE networking is deprecated and should not be used anymore
+NETWORKING_MODE = 'vde'
+VDE_FOLDER = '/tmp/vde.ctl'
+VDE_TAP_INTERFACE = 'tap-vde'
 
 QUEUE_NAME = 'vm-queue'
 BASE_IMAGE_FOLDER = Path('base_images')
@@ -110,20 +120,28 @@ def callback(ch, method, properties, body):
             print(str(e), file=sys.stderr)
             return
 
-        tap_device = f'vm-{vm_id}'
-        if not interfaces.create_tap_device(
-                tap_device, 'br0', run_qemu_username):
-            print(f'Could not create tap device for VM "{vm_id}"',
-                  file=sys.stderr)
-            return
+        if NETWORKING_MODE != 'vde':
+            tap_device = f'vm-{vm_id}'
+            if not interfaces.create_tap_device(
+                    tap_device, 'br0', run_qemu_username):
+                print(f'Could not create tap device for VM "{vm_id}"',
+                      file=sys.stderr)
+                return
 
         mac_addr = interfaces.create_mac_address()
         print(f'Assigning MAC address "{mac_addr}" to VM "{vm_id}"')
 
+        if NETWORKING_MODE == 'vde':
+            netdev = \
+                f'vde,id=pubnet,sock={VDE_FOLDER}'
+        else:
+            netdev = \
+                f'tap,id=pubnet,ifname={tap_device},script=no,downscript=no'
+
         p = subprocess.Popen([
             'qemu-system-x86_64', '-m', '4096', '-hda', str(user_image),
             '-device', f'virtio-net-pci,netdev=pubnet,mac={mac_addr}',
-            '-netdev', f'tap,id=pubnet,ifname={tap_device},script=no,downscript=no',
+            '-netdev', netdev,
             '-name', f'qemu-vm-{vm_id},process=vm-{vm_id}',
         ])
         print(f'Started VM "{vm_id}" as process ID {p.pid}')
@@ -143,8 +161,31 @@ def callback(ch, method, properties, body):
 def run():
     channel.basic_consume(queue=QUEUE_NAME, on_message_callback=callback)
 
-    if not interfaces.check_device_existence('br0'):
-        interfaces.init_bridge(
-            'br0', 'enp0s25', '192.168.2.10/24', '192.168.2.1')
+    # if we're on VDE networking, a TAP interface must already have been
+    # created
+    if NETWORKING_MODE == 'vde':
+        if not interfaces.check_device_existence(VDE_TAP_INTERFACE):
+            print(
+                f'Interface {VDE_TAP_INTERFACE} does not exist. '
+                'Please create it manually and then start this service again',
+                file=sys.stderr)
+            sys.exit(1)
+
+        logging.info('Bringing up VDE networking')
+        execution.copy_systemd_unit(
+            Path('data/systemd/aetherscale-vde.service'),
+            'aetherscale-vde.service')
+        execution.start_systemd_unit('aetherscale-vde.service')
+        # Give systemd a bit time to start VDE
+        time.sleep(0.5)
+        if not execution.systemctl_is_running('aetherscale-vde.service'):
+            logging.error('Failed to start VDE networking.')
+            sys.exit(1)
+    else:
+        if not interfaces.check_device_existence('br0'):
+            # TODO: Should remove hardcoded IP addresses, but this
+            # networking method will be deleted anyway
+            interfaces.init_bridge(
+                'br0', 'enp0s25', '192.168.2.10/24', '192.168.2.1')
 
     channel.start_consuming()
