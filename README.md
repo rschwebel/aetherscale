@@ -57,7 +57,7 @@ The server can be started with:
 aetherscale
 ```
 
-For example, to list all running VMs tun the following client command:
+For example, to list all running VMs run the following client command:
 
 ```bash
 aetherscale-cli list-vms
