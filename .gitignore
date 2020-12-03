@@ -1,6 +1,7 @@
 base_images
 user_images
 
+.idea
 build
 dist
 env
