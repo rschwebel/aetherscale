@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import logging
 import json
 import os
@@ -5,11 +6,13 @@ from pathlib import Path
 import pika
 import psutil
 import random
+import shlex
 import string
 import subprocess
 import sys
+import tempfile
 import time
-from typing import List, Optional
+from typing import List, Optional, IO
 
 from . import interfaces
 from . import execution
@@ -71,6 +74,37 @@ def get_process_for_vm(vm_id: str) -> Optional[psutil.Process]:
             return proc
 
     return None
+
+
+@dataclass
+class QemuStartupConfig:
+    vm_id: str
+    hda: Path
+    mac_addr: str
+    netdev: str
+
+
+def create_qemu_systemd_unit(
+        unit_file: IO[str], qemu_config: QemuStartupConfig):
+    hda_quoted = shlex.quote(str(qemu_config.hda.absolute()))
+    device_quoted = shlex.quote(
+        f'virtio-net-pci,netdev=pubnet,mac={qemu_config.mac_addr}')
+    netdev_quoted = shlex.quote(qemu_config.netdev)
+    name = f'qemu-vm-{qemu_config.vm_id},process=vm-{qemu_config.vm_id}'
+    name_quoted = shlex.quote(name)
+
+    command = f'qemu-system-x86_64 -m 4096 -accel kvm -hda {hda_quoted} ' \
+        f'-device {device_quoted} -netdev {netdev_quoted} ' \
+        f'-name {name_quoted}'
+
+    unit_file.write('[Unit]\n')
+    unit_file.write(f'Description=aetherscale VM {qemu_config.vm_id}\n')
+    unit_file.write('\n')
+    unit_file.write('[Service]\n')
+    unit_file.write(f'ExecStart={command}\n')
+    unit_file.write('\n')
+    unit_file.write('[Install]\n')
+    unit_file.write('WantedBy=default.target\n')
 
 
 def callback(ch, method, properties, body):
@@ -138,14 +172,20 @@ def callback(ch, method, properties, body):
             netdev = \
                 f'tap,id=pubnet,ifname={tap_device},script=no,downscript=no'
 
-        p = subprocess.Popen([
-            'qemu-system-x86_64', '-m', '4096', '-accel', 'kvm',
-            '-hda', str(user_image),
-            '-device', f'virtio-net-pci,netdev=pubnet,mac={mac_addr}',
-            '-netdev', netdev,
-            '-name', f'qemu-vm-{vm_id},process=vm-{vm_id}',
-        ])
-        print(f'Started VM "{vm_id}" as process ID {p.pid}')
+        qemu_config = QemuStartupConfig(
+            vm_id=vm_id,
+            hda=user_image,
+            mac_addr=mac_addr,
+            netdev=netdev)
+        unit_name = f'aetherscale-vm-{vm_id}.service'
+
+        with tempfile.NamedTemporaryFile(mode='w+t', delete=False) as f:
+            create_qemu_systemd_unit(f, qemu_config)
+        execution.copy_systemd_unit(Path(f.name), unit_name)
+        os.remove(f.name)
+        execution.start_systemd_unit(unit_name)
+
+        print(f'Started VM "{vm_id}"')
 
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
