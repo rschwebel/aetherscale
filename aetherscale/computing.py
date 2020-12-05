@@ -73,6 +73,10 @@ def get_process_for_vm(vm_id: str) -> Optional[psutil.Process]:
     return None
 
 
+def systemd_unit_name_for_vm(vm_id: str) -> str:
+    return f'aetherscale-vm-{vm_id}.service'
+
+
 @dataclass
 class QemuStartupConfig:
     vm_id: str
@@ -128,9 +132,13 @@ def callback(ch, method, properties, body):
             print('VM ID not specified', file=sys.stderr)
             return
 
-        process = get_process_for_vm(vm_id)
-        if process:
-            process.kill()
+        unit_name = systemd_unit_name_for_vm(vm_id)
+        is_running = execution.systemctl_is_running(unit_name)
+
+        if is_running:
+            execution.disable_systemd_unit(unit_name)
+            execution.stop_systemd_unit(unit_name)
+
             response = {
                 'status': 'killed',
                 'vm-id': vm_id,
@@ -165,7 +173,7 @@ def callback(ch, method, properties, body):
             hda_image=user_image,
             mac_addr=mac_addr,
             vde_folder=Path(VDE_FOLDER))
-        unit_name = f'aetherscale-vm-{vm_id}.service'
+        unit_name = systemd_unit_name_for_vm(vm_id)
         create_qemu_systemd_unit(unit_name, qemu_config)
         execution.start_systemd_unit(unit_name)
 
