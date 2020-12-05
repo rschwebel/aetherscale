@@ -21,15 +21,12 @@ from . import execution
 # logging from print
 
 # Non-VDE networking is deprecated and should not be used anymore
-NETWORKING_MODE = 'vde'
 VDE_FOLDER = '/tmp/vde.ctl'
 VDE_TAP_INTERFACE = 'tap-vde'
 
 QUEUE_NAME = 'vm-queue'
 BASE_IMAGE_FOLDER = Path('base_images')
 USER_IMAGE_FOLDER = Path('user_images')
-
-run_qemu_username = os.getenv('RUN_QEMU_AS')
 
 connection = pika.BlockingConnection(
     pika.ConnectionParameters(host='localhost'))
@@ -79,33 +76,38 @@ def get_process_for_vm(vm_id: str) -> Optional[psutil.Process]:
 @dataclass
 class QemuStartupConfig:
     vm_id: str
-    hda: Path
+    hda_image: Path
     mac_addr: str
-    netdev: str
+    vde_folder: Path
 
 
 def create_qemu_systemd_unit(
-        unit_file: IO[str], qemu_config: QemuStartupConfig):
-    hda_quoted = shlex.quote(str(qemu_config.hda.absolute()))
+        unit_name: str, qemu_config: QemuStartupConfig):
+    hda_quoted = shlex.quote(str(qemu_config.hda_image.absolute()))
     device_quoted = shlex.quote(
         f'virtio-net-pci,netdev=pubnet,mac={qemu_config.mac_addr}')
-    netdev_quoted = shlex.quote(qemu_config.netdev)
-    name = f'qemu-vm-{qemu_config.vm_id},process=vm-{qemu_config.vm_id}'
-    name_quoted = shlex.quote(name)
+    netdev_quoted = shlex.quote(
+        f'vde,id=pubnet,sock={str(qemu_config.vde_folder)}')
+    name_quoted = shlex.quote(
+        f'qemu-vm-{qemu_config.vm_id},process=vm-{qemu_config.vm_id}')
 
     command = f'qemu-system-x86_64 -m 4096 -accel kvm -hda {hda_quoted} ' \
-        '-nographic ' \
         f'-device {device_quoted} -netdev {netdev_quoted} ' \
-        f'-name {name_quoted}'
+        f'-name {name_quoted} ' \
+        '-nographic'
 
-    unit_file.write('[Unit]\n')
-    unit_file.write(f'Description=aetherscale VM {qemu_config.vm_id}\n')
-    unit_file.write('\n')
-    unit_file.write('[Service]\n')
-    unit_file.write(f'ExecStart={command}\n')
-    unit_file.write('\n')
-    unit_file.write('[Install]\n')
-    unit_file.write('WantedBy=default.target\n')
+    with tempfile.NamedTemporaryFile(mode='w+t', delete=False) as f:
+        f.write('[Unit]\n')
+        f.write(f'Description=aetherscale VM {qemu_config.vm_id}\n')
+        f.write('\n')
+        f.write('[Service]\n')
+        f.write(f'ExecStart={command}\n')
+        f.write('\n')
+        f.write('[Install]\n')
+        f.write('WantedBy=default.target\n')
+
+    execution.copy_systemd_unit(Path(f.name), unit_name)
+    os.remove(f.name)
 
 
 def callback(ch, method, properties, body):
@@ -155,35 +157,16 @@ def callback(ch, method, properties, body):
             print(str(e), file=sys.stderr)
             return
 
-        if NETWORKING_MODE != 'vde':
-            tap_device = f'vm-{vm_id}'
-            if not interfaces.create_tap_device(
-                    tap_device, 'br0', run_qemu_username):
-                print(f'Could not create tap device for VM "{vm_id}"',
-                      file=sys.stderr)
-                return
-
         mac_addr = interfaces.create_mac_address()
         print(f'Assigning MAC address "{mac_addr}" to VM "{vm_id}"')
 
-        if NETWORKING_MODE == 'vde':
-            netdev = \
-                f'vde,id=pubnet,sock={VDE_FOLDER}'
-        else:
-            netdev = \
-                f'tap,id=pubnet,ifname={tap_device},script=no,downscript=no'
-
         qemu_config = QemuStartupConfig(
             vm_id=vm_id,
-            hda=user_image,
+            hda_image=user_image,
             mac_addr=mac_addr,
-            netdev=netdev)
+            vde_folder=Path(VDE_FOLDER))
         unit_name = f'aetherscale-vm-{vm_id}.service'
-
-        with tempfile.NamedTemporaryFile(mode='w+t', delete=False) as f:
-            create_qemu_systemd_unit(f, qemu_config)
-        execution.copy_systemd_unit(Path(f.name), unit_name)
-        os.remove(f.name)
+        create_qemu_systemd_unit(unit_name, qemu_config)
         execution.start_systemd_unit(unit_name)
 
         print(f'Started VM "{vm_id}"')
@@ -207,31 +190,23 @@ def callback(ch, method, properties, body):
 def run():
     channel.basic_consume(queue=QUEUE_NAME, on_message_callback=callback)
 
-    # if we're on VDE networking, a TAP interface must already have been
-    # created
-    if NETWORKING_MODE == 'vde':
-        if not interfaces.check_device_existence(VDE_TAP_INTERFACE):
-            print(
-                f'Interface {VDE_TAP_INTERFACE} does not exist. '
-                'Please create it manually and then start this service again',
-                file=sys.stderr)
-            sys.exit(1)
+    # a TAP interface for VDE must already have been created
+    if not interfaces.check_device_existence(VDE_TAP_INTERFACE):
+        print(
+            f'Interface {VDE_TAP_INTERFACE} does not exist. '
+            'Please create it manually and then start this service again',
+            file=sys.stderr)
+        sys.exit(1)
 
-        logging.info('Bringing up VDE networking')
-        execution.copy_systemd_unit(
-            Path('data/systemd/aetherscale-vde.service'),
-            'aetherscale-vde.service')
-        execution.start_systemd_unit('aetherscale-vde.service')
-        # Give systemd a bit time to start VDE
-        time.sleep(0.5)
-        if not execution.systemctl_is_running('aetherscale-vde.service'):
-            logging.error('Failed to start VDE networking.')
-            sys.exit(1)
-    else:
-        if not interfaces.check_device_existence('br0'):
-            # TODO: Should remove hardcoded IP addresses, but this
-            # networking method will be deleted anyway
-            interfaces.init_bridge(
-                'br0', 'enp0s25', '192.168.2.10/24', '192.168.2.1')
+    logging.info('Bringing up VDE networking')
+    execution.copy_systemd_unit(
+        Path('data/systemd/aetherscale-vde.service'),
+        'aetherscale-vde.service')
+    execution.start_systemd_unit('aetherscale-vde.service')
+    # Give systemd a bit time to start VDE
+    time.sleep(0.5)
+    if not execution.systemctl_is_running('aetherscale-vde.service'):
+        logging.error('Failed to start VDE networking.')
+        sys.exit(1)
 
     channel.start_consuming()
