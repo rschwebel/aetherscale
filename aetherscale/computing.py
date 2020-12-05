@@ -94,6 +94,7 @@ def create_qemu_systemd_unit(
     name_quoted = shlex.quote(name)
 
     command = f'qemu-system-x86_64 -m 4096 -accel kvm -hda {hda_quoted} ' \
+        '-nographic ' \
         f'-device {device_quoted} -netdev {netdev_quoted} ' \
         f'-name {name_quoted}'
 
