@@ -79,7 +79,7 @@ def main():
             'command': 'list-vms',
         }
     elif args.subparser_name == 'start-vm':
-        response_expected = False
+        response_expected = True
         data = {
             'command': 'start-vm',
             'options': {

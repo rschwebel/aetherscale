@@ -187,6 +187,10 @@ def callback(ch, method, properties, body):
         execution.start_systemd_unit(unit_name)
 
         print(f'Started VM "{vm_id}"')
+        response = {
+            'status': 'starting',
+            'vm-id': vm_id,
+        }
 
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
