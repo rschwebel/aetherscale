@@ -3,6 +3,7 @@
 import argparse
 import json
 import pika
+import pika.exceptions
 import sys
 
 
@@ -64,13 +65,21 @@ def main():
     parser = argparse.ArgumentParser(
         description='Manage aetherscale instances')
     subparsers = parser.add_subparsers(dest='subparser_name')
-    create_vm_parser = subparsers.add_parser('start-vm')
+
+    create_vm_parser = subparsers.add_parser('create-vm')
     create_vm_parser.add_argument(
-        '--image', help='Name of the image to start', required=True)
-    create_vm_parser = subparsers.add_parser('stop-vm')
-    create_vm_parser.add_argument(
+        '--image', help='Name of the image to create a VM from', required=True)
+    start_vm_parser = subparsers.add_parser('start-vm')
+    start_vm_parser.add_argument(
+        '--vm-id', dest='vm_id', help='ID of the VM to start', required=True)
+    stop_vm_parser = subparsers.add_parser('stop-vm')
+    stop_vm_parser.add_argument(
         '--vm-id', dest='vm_id', help='ID of the VM to stop', required=True)
+    delete_vm_parser = subparsers.add_parser('delete-vm')
+    delete_vm_parser.add_argument(
+        '--vm-id', dest='vm_id', help='ID of the VM to delete', required=True)
     subparsers.add_parser('list-vms')
+
     args = parser.parse_args()
 
     if args.subparser_name == 'list-vms':
@@ -78,25 +87,24 @@ def main():
         data = {
             'command': 'list-vms',
         }
-    elif args.subparser_name == 'start-vm':
+    elif args.subparser_name == 'create-vm':
         response_expected = True
         data = {
-            'command': 'start-vm',
+            'command': 'create-vm',
             'options': {
                 'image': args.image,
             }
         }
-    elif args.subparser_name == 'stop-vm':
+    elif args.subparser_name in ['start-vm', 'stop-vm', 'delete-vm']:
         response_expected = True
         data = {
-            'command': 'stop-vm',
+            'command': args.subparser_name,
             'options': {
-                'kill': True,
                 'vm-id': args.vm_id,
             }
         }
     else:
-        print('Command does not exist', file=sys.stderr)
+        parser.print_usage()
         sys.exit(1)
 
     try:

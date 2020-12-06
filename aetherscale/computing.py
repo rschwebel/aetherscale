@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import List, Optional, IO
+from typing import List, Optional, Dict, Any, Callable
 
 from . import interfaces
 from . import execution
@@ -39,12 +39,16 @@ class QemuException(Exception):
     pass
 
 
+def user_image_path(vm_id: str) -> Path:
+    return USER_IMAGE_FOLDER / f'{vm_id}.qcow2'
+
+
 def create_user_image(vm_id: str, image_name: str) -> Path:
     base_image = BASE_IMAGE_FOLDER / f'{image_name}.qcow2'
     if not base_image.is_file():
         raise IOError(f'Image "{image_name}" does not exist')
 
-    user_image = USER_IMAGE_FOLDER / f'{vm_id}.qcow2'
+    user_image = user_image_path(vm_id)
 
     create_img_result = subprocess.run([
         'qemu-img', 'create', '-f', 'qcow2',
@@ -55,7 +59,7 @@ def create_user_image(vm_id: str, image_name: str) -> Path:
     return user_image
 
 
-def list_vms() -> List[str]:
+def list_vms(_: Dict[str, Any]) -> List[str]:
     vms = []
 
     for proc in psutil.process_iter(['pid', 'name']):
@@ -63,6 +67,116 @@ def list_vms() -> List[str]:
             vms.append(proc.name())
 
     return vms
+
+
+def create_vm(options: Dict[str, Any]) -> Dict[str, str]:
+    vm_id = ''.join(
+        random.choice(string.ascii_lowercase) for _ in range(8))
+    logging.info(f'Starting VM "{vm_id}"')
+
+    try:
+        image_name = os.path.basename(options['image'])
+    except KeyError:
+        raise ValueError('Image not specified')
+
+    try:
+        user_image = create_user_image(vm_id, image_name)
+    except (OSError, QemuException):
+        raise
+
+    mac_addr = interfaces.create_mac_address()
+    logging.debug(f'Assigning MAC address "{mac_addr}" to VM "{vm_id}"')
+
+    qemu_config = QemuStartupConfig(
+        vm_id=vm_id,
+        hda_image=user_image,
+        mac_addr=mac_addr,
+        vde_folder=Path(VDE_FOLDER))
+    unit_name = systemd_unit_name_for_vm(vm_id)
+    create_qemu_systemd_unit(unit_name, qemu_config)
+    execution.start_systemd_unit(unit_name)
+
+    logging.info(f'Started VM "{vm_id}"')
+    return {
+        'status': 'starting',
+        'vm-id': vm_id,
+    }
+
+
+def start_vm(options: Dict[str, Any]) -> Dict[str, str]:
+    try:
+        vm_id = options['vm-id']
+    except KeyError:
+        raise ValueError('VM ID not specified')
+
+    unit_name = systemd_unit_name_for_vm(vm_id)
+
+    if not execution.systemd_unit_exists(unit_name):
+        raise RuntimeError('VM does not exist')
+    elif execution.systemctl_is_running(unit_name):
+        response = {
+            'status': 'starting',
+            'vm-id': vm_id,
+            'hint': f'VM "{vm_id}" was already started',
+        }
+    else:
+        execution.start_systemd_unit(unit_name)
+        execution.enable_systemd_unit(unit_name)
+
+        response = {
+            'status': 'starting',
+            'vm-id': vm_id,
+        }
+
+    return response
+
+
+def stop_vm(options: Dict[str, Any]) -> Dict[str, str]:
+    try:
+        vm_id = options['vm-id']
+    except KeyError:
+        raise ValueError('VM ID not specified')
+
+    unit_name = systemd_unit_name_for_vm(vm_id)
+
+    if not execution.systemd_unit_exists(unit_name):
+        raise RuntimeError('VM does not exist')
+    elif not execution.systemctl_is_running(unit_name):
+        response = {
+            'status': 'killed',
+            'vm-id': vm_id,
+            'hint': f'VM "{vm_id}" was not running',
+        }
+    else:
+        execution.disable_systemd_unit(unit_name)
+        execution.stop_systemd_unit(unit_name)
+
+        response = {
+            'status': 'killed',
+            'vm-id': vm_id,
+        }
+
+    return response
+
+
+def delete_vm(options: Dict[str, Any]) -> Dict[str, str]:
+    try:
+        vm_id = options['vm-id']
+    except KeyError:
+        raise ValueError('VM ID not specified')
+
+    stop_vm(options)
+
+    unit_name = systemd_unit_name_for_vm(vm_id)
+    user_image = user_image_path(vm_id)
+
+    execution.delete_systemd_unit(unit_name)
+    user_image.unlink()
+
+    return {
+        'status': 'deleted',
+        'vm-id': vm_id,
+    }
 
 
 def get_process_for_vm(vm_id: str) -> Optional[psutil.Process]:
@@ -115,84 +229,61 @@ def create_qemu_systemd_unit(
 
 
 def callback(ch, method, properties, body):
+    command_fn: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
+        'list-vms': list_vms,
+        'create-vm': create_vm,
+        'start-vm': start_vm,
+        'stop-vm': stop_vm,
+        'delete-vm': delete_vm,
+    }
+
     message = body.decode('utf-8')
-    print('Received message: ' + message)
+    logging.debug('Received message: ' + message)
 
     data = json.loads(message)
-    response = None
 
-    if 'command' not in data:
+    try:
+        command = data['command']
+    except KeyError:
+        logging.error('No "command" specified in message')
         return
-    elif data['command'] == 'list-vms':
-        response = list_vms()
-    elif data['command'] == 'stop-vm':
-        try:
-            vm_id = data['options']['vm-id']
-        except KeyError:
-            print('VM ID not specified', file=sys.stderr)
-            return
 
-        unit_name = systemd_unit_name_for_vm(vm_id)
-        is_running = execution.systemctl_is_running(unit_name)
+    try:
+        fn = command_fn[command]
+    except KeyError:
+        logging.error(f'Invalid command "{command}" specified')
+        return
 
-        if is_running:
-            execution.disable_systemd_unit(unit_name)
-            execution.stop_systemd_unit(unit_name)
-
-            response = {
-                'status': 'killed',
-                'vm-id': vm_id,
-            }
-        else:
-            response = {
+    options = data.get('options', {})
+    try:
+        response = fn(options)
+        # if a function wants to return a response
+        # set its execution status to success
+        resp_message = {
+            'execution-info': {
+                'status': 'success'
+            },
+            'response': response,
+        }
+    except Exception as e:
+        resp_message = {
+            'execution-info': {
                 'status': 'error',
-                'reason': f'VM "{vm_id}" does not exist',
+                # TODO: Only ouput message if it is an exception generated by us
+                'reason': str(e),
             }
-    elif data['command'] == 'start-vm':
-        vm_id = ''.join(
-            random.choice(string.ascii_lowercase) for i in range(8))
-        print(f'Starting VM "{vm_id}"')
-
-        try:
-            image_name = os.path.basename(data['options']['image'])
-        except KeyError:
-            print('Image not specified', file=sys.stderr)
-            return
-
-        try:
-            user_image = create_user_image(vm_id, image_name)
-        except (OSError, QemuException) as e:
-            print(str(e), file=sys.stderr)
-            return
-
-        mac_addr = interfaces.create_mac_address()
-        print(f'Assigning MAC address "{mac_addr}" to VM "{vm_id}"')
-
-        qemu_config = QemuStartupConfig(
-            vm_id=vm_id,
-            hda_image=user_image,
-            mac_addr=mac_addr,
-            vde_folder=Path(VDE_FOLDER))
-        unit_name = systemd_unit_name_for_vm(vm_id)
-        create_qemu_systemd_unit(unit_name, qemu_config)
-        execution.start_systemd_unit(unit_name)
-
-        print(f'Started VM "{vm_id}"')
-        response = {
-            'status': 'starting',
-            'vm-id': vm_id,
         }
 
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
-    if response is not None and properties.reply_to:
+    if properties.reply_to:
         ch.basic_publish(
             exchange='',
             routing_key=properties.reply_to,
             properties=pika.BasicProperties(
                 correlation_id=properties.correlation_id
             ),
-            body=json.dumps(response))
+            body=json.dumps(resp_message))
 
 
 def run():

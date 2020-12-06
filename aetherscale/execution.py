@@ -66,3 +66,7 @@ def systemctl_is_running(unit_name: str) -> bool:
     result = subprocess.run([
         'systemctl', '--user', 'is-active', '--quiet', unit_name])
     return result.returncode == 0
+
+
+def systemd_unit_exists(unit_name: str) -> bool:
+    return systemd_unit_path(unit_name).is_file()
