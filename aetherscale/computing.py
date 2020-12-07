@@ -16,6 +16,7 @@ from typing import List, Optional, Dict, Any, Callable
 
 from . import interfaces
 from . import execution
+from . import qemu
 
 # TODO: Since this is not a command line interface file anymore, switch to
 # logging from print
@@ -41,6 +42,10 @@ class QemuException(Exception):
 
 def user_image_path(vm_id: str) -> Path:
     return USER_IMAGE_FOLDER / f'{vm_id}.qcow2'
+
+
+def qemu_socket_monitor(vm_id: str) -> Path:
+    return Path(f'/tmp/aetherscale-qmp-{vm_id}.sock')
 
 
 def create_user_image(vm_id: str, image_name: str) -> Path:
@@ -137,22 +142,31 @@ def stop_vm(options: Dict[str, Any]) -> Dict[str, str]:
     except KeyError:
         raise ValueError('VM ID not specified')
 
+    kill_flag = bool(options.get('kill', False))
+    stop_status = 'killed' if kill_flag else 'stopped'
+
     unit_name = systemd_unit_name_for_vm(vm_id)
 
     if not execution.systemd_unit_exists(unit_name):
         raise RuntimeError('VM does not exist')
     elif not execution.systemctl_is_running(unit_name):
         response = {
-            'status': 'killed',
+            'status': stop_status,
             'vm-id': vm_id,
             'hint': f'VM "{vm_id}" was not running',
         }
     else:
         execution.disable_systemd_unit(unit_name)
-        execution.stop_systemd_unit(unit_name)
+
+        if kill_flag:
+            execution.stop_systemd_unit(unit_name)
+        else:
+            qemu_socket = qemu_socket_monitor(vm_id)
+            qm = qemu.QemuMonitor(qemu_socket)
+            qm.execute('system_powerdown')
 
         response = {
-            'status': 'killed',
+            'status': stop_status,
             'vm-id': vm_id,
         }
 
@@ -165,6 +179,8 @@ def delete_vm(options: Dict[str, Any]) -> Dict[str, str]:
     except KeyError:
         raise ValueError('VM ID not specified')
 
+    # force kill stop when a VM is deleted
+    options['kill'] = True
     stop_vm(options)
 
     unit_name = systemd_unit_name_for_vm(vm_id)
@@ -209,10 +225,14 @@ def create_qemu_systemd_unit(
     name_quoted = shlex.quote(
         f'qemu-vm-{qemu_config.vm_id},process=vm-{qemu_config.vm_id}')
 
+    qemu_monitor_path = qemu_socket_monitor(qemu_config.vm_id)
+    socket_quoted = shlex.quote(f'unix:{qemu_monitor_path},server,nowait')
+
     command = f'qemu-system-x86_64 -m 4096 -accel kvm -hda {hda_quoted} ' \
         f'-device {device_quoted} -netdev {netdev_quoted} ' \
         f'-name {name_quoted} ' \
-        '-nographic'
+        '-nographic ' \
+        f'-qmp {socket_quoted}'
 
     with tempfile.NamedTemporaryFile(mode='w+t', delete=False) as f:
         f.write('[Unit]\n')

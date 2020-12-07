@@ -75,6 +75,9 @@ def main():
     stop_vm_parser = subparsers.add_parser('stop-vm')
     stop_vm_parser.add_argument(
         '--vm-id', dest='vm_id', help='ID of the VM to stop', required=True)
+    stop_vm_parser.add_argument(
+        '--kill', dest='kill', action='store_true', default=False,
+        help='Kill the VM immediately, no graceful shutdown')
     delete_vm_parser = subparsers.add_parser('delete-vm')
     delete_vm_parser.add_argument(
         '--vm-id', dest='vm_id', help='ID of the VM to delete', required=True)
@@ -95,7 +98,16 @@ def main():
                 'image': args.image,
             }
         }
-    elif args.subparser_name in ['start-vm', 'stop-vm', 'delete-vm']:
+    elif args.subparser_name == 'stop-vm':
+        response_expected = True
+        data = {
+            'command': args.subparser_name,
+            'options': {
+                'vm-id': args.vm_id,
+                'kill': args.kill,
+            }
+        }
+    elif args.subparser_name in ['start-vm', 'delete-vm']:
         response_expected = True
         data = {
             'command': args.subparser_name,
