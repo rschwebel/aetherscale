@@ -2,6 +2,7 @@ base_images
 user_images
 
 .idea
+.tox
 build
 dist
 env

@@ -63,6 +63,14 @@ For example, to list all running VMs run the following client command:
 aetherscale-cli list-vms
 ```
 
+## Run Tests
+
+You can run tests with `tox`:
+
+```bash
+tox
+```
+
 
 ## Overview
 
