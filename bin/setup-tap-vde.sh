@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 usage() {
-    echo "Usage: $0 -u USER -i IP_ADDRESS -g GATEWAY -e eth_device_DEVICE"
+    echo "Usage: $0 -u USER -i IP_ADDRESS -g GATEWAY -e PHYSICAL_DEVICE"
 }
 
 while getopts ":hu:i:g:e:" opt; do
