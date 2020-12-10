@@ -17,7 +17,7 @@ from typing import List, Optional, Dict, Any, Callable
 from . import interfaces
 from . import execution
 from . import qemu
-from .config import RABBITMQ_HOST
+from .config import LOG_LEVEL, RABBITMQ_HOST
 
 
 VDE_FOLDER = '/tmp/vde.ctl'
@@ -32,6 +32,8 @@ QUEUE_COMMANDS_MAP = {
     '': ['list-vms', 'start-vm', 'stop-vm', 'delete-vm'],
     COMPETING_QUEUE: ['create-vm'],
 }
+
+logging.basicConfig(level=LOG_LEVEL)
 
 
 class QemuException(Exception):
