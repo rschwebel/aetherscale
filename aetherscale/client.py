@@ -6,17 +6,17 @@ import pika
 import pika.exceptions
 import sys
 
+from .config import RABBITMQ_HOST
+
+
+EXCHANGE_NAME = 'computing'
+
 
 class ServerCommunication:
-    def __init__(self):
-        self.queue = 'vm-queue'
-
     def __enter__(self):
         self.connection = pika.BlockingConnection(
-            pika.ConnectionParameters(host='localhost'))
+            pika.ConnectionParameters(host=RABBITMQ_HOST))
         self.channel = self.connection.channel()
-
-        self.channel.queue_declare(queue=self.queue)
 
         self.channel.basic_consume(
             queue='amq.rabbitmq.reply-to',
@@ -43,8 +43,8 @@ class ServerCommunication:
             reply_to = 'amq.rabbitmq.reply-to'
 
         self.channel.basic_publish(
-            exchange='',
-            routing_key=self.queue,
+            exchange=EXCHANGE_NAME,
+            routing_key=data['command'],
             properties=pika.BasicProperties(
                 reply_to=reply_to,
                 content_type='application/json',

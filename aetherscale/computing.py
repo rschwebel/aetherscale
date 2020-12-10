@@ -17,23 +17,21 @@ from typing import List, Optional, Dict, Any, Callable
 from . import interfaces
 from . import execution
 from . import qemu
+from .config import RABBITMQ_HOST
 
-# TODO: Since this is not a command line interface file anymore, switch to
-# logging from print
 
-# Non-VDE networking is deprecated and should not be used anymore
 VDE_FOLDER = '/tmp/vde.ctl'
 VDE_TAP_INTERFACE = 'tap-vde'
 
-QUEUE_NAME = 'vm-queue'
 BASE_IMAGE_FOLDER = Path('base_images')
 USER_IMAGE_FOLDER = Path('user_images')
 
-connection = pika.BlockingConnection(
-    pika.ConnectionParameters(host='localhost'))
-channel = connection.channel()
-
-channel.queue_declare(queue=QUEUE_NAME)
+EXCHANGE_NAME = 'computing'
+COMPETING_QUEUE = 'computing-competing'
+QUEUE_COMMANDS_MAP = {
+    '': ['list-vms', 'start-vm', 'stop-vm', 'delete-vm'],
+    COMPETING_QUEUE: ['create-vm'],
+}
 
 
 class QemuException(Exception):
@@ -307,14 +305,36 @@ def callback(ch, method, properties, body):
 
 
 def run():
-    channel.basic_consume(queue=QUEUE_NAME, on_message_callback=callback)
+    connection = pika.BlockingConnection(
+        pika.ConnectionParameters(host=RABBITMQ_HOST))
+    channel = connection.channel()
+
+    channel.exchange_declare(exchange=EXCHANGE_NAME, exchange_type='direct')
+
+    # let rabbitmq define a name for the exclusive queue
+    result = channel.queue_declare(queue='', exclusive=True)
+    exclusive_queue_name = result.method.queue
+    # setup one queue that is shared by all consumers
+    channel.queue_declare(queue=COMPETING_QUEUE)
+
+    for queue, commands in QUEUE_COMMANDS_MAP.items():
+        if queue == '':
+            queue = exclusive_queue_name
+
+        for command in commands:
+            channel.queue_bind(
+                exchange=EXCHANGE_NAME, queue=queue, routing_key=command)
+
+    channel.basic_consume(
+        queue=exclusive_queue_name, on_message_callback=callback)
+    channel.basic_consume(
+        queue=COMPETING_QUEUE, on_message_callback=callback)
 
     # a TAP interface for VDE must already have been created
     if not interfaces.check_device_existence(VDE_TAP_INTERFACE):
-        print(
+        logging.error(
             f'Interface {VDE_TAP_INTERFACE} does not exist. '
-            'Please create it manually and then start this service again',
-            file=sys.stderr)
+            'Please create it manually and then start this service again')
         sys.exit(1)
 
     logging.info('Bringing up VDE networking')
