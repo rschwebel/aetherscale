@@ -28,10 +28,6 @@ class ServerCommunication:
     def on_response(self, ch, method, properties, body):
         self.responses.append(json.loads(body))
 
-        # TODO: Stopping consuming on the first message only works
-        # as long as we only expect one message
-        self.channel.stop_consuming()
-
     def on_timeout(self):
         self.channel.stop_consuming()
 
