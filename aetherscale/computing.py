@@ -180,7 +180,7 @@ def stop_vm(options: Dict[str, Any]) -> Dict[str, str]:
             execution.stop_systemd_unit(unit_name)
         else:
             qemu_socket = qemu_socket_monitor(vm_id)
-            qm = qemu.QemuMonitor(qemu_socket)
+            qm = qemu.QemuMonitor(qemu_socket, protocol=qemu.QemuProtocol.QMP)
             qm.execute('system_powerdown')
 
         response = {
