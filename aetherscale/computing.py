@@ -36,16 +36,16 @@ QUEUE_COMMANDS_MAP = {
 logging.basicConfig(level=LOG_LEVEL)
 
 
-class QemuException(Exception):
-    pass
-
-
 def user_image_path(vm_id: str) -> Path:
     return USER_IMAGE_FOLDER / f'{vm_id}.qcow2'
 
 
 def qemu_socket_monitor(vm_id: str) -> Path:
     return Path(f'/tmp/aetherscale-qmp-{vm_id}.sock')
+
+
+def qemu_socket_guest_agent(vm_id: str) -> Path:
+    return Path(f'/tmp/aetherscale-qga-{vm_id}.sock')
 
 
 def create_user_image(vm_id: str, image_name: str) -> Path:
@@ -59,17 +59,35 @@ def create_user_image(vm_id: str, image_name: str) -> Path:
         'qemu-img', 'create', '-f', 'qcow2',
         '-b', str(base_image.absolute()), '-F', 'qcow2', str(user_image)])
     if create_img_result.returncode != 0:
-        raise QemuException(f'Could not create image for VM "{vm_id}"')
+        raise qemu.QemuException(f'Could not create image for VM "{vm_id}"')
 
     return user_image
 
 
-def list_vms(_: Dict[str, Any]) -> List[str]:
+def list_vms(_: Dict[str, Any]) -> List[Dict[str, Any]]:
     vms = []
 
     for proc in psutil.process_iter(['pid', 'name']):
         if proc.name().startswith('vm-'):
-            vms.append(proc.name())
+            vm_id = proc.name()[3:]
+
+            socket_file = qemu_socket_guest_agent(vm_id)
+            hint = None
+            ip_addresses = []
+            try:
+                fetcher = qemu.GuestAgentIpAddress(socket_file)
+                ip_addresses = fetcher.fetch_ip_addresses()
+            except qemu.QemuException:
+                hint = 'Could not retrieve IP address for guest'
+
+            msg = {
+                'vm-id': vm_id,
+                'ip-addresses': ip_addresses,
+            }
+            if hint:
+                msg['hint'] = hint
+
+            vms.append(msg)
 
     return vms
 
@@ -86,7 +104,7 @@ def create_vm(options: Dict[str, Any]) -> Dict[str, str]:
 
     try:
         user_image = create_user_image(vm_id, image_name)
-    except (OSError, QemuException):
+    except (OSError, qemu.QemuException):
         raise
 
     mac_addr = interfaces.create_mac_address()
@@ -228,11 +246,18 @@ def create_qemu_systemd_unit(
     qemu_monitor_path = qemu_socket_monitor(qemu_config.vm_id)
     socket_quoted = shlex.quote(f'unix:{qemu_monitor_path},server,nowait')
 
+    qga_monitor_path = qemu_socket_guest_agent(qemu_config.vm_id)
+    qga_chardev_quoted = shlex.quote(
+        f'socket,path={qga_monitor_path},server,nowait,id=qga0')
+
     command = f'qemu-system-x86_64 -m 4096 -accel kvm -hda {hda_quoted} ' \
         f'-device {device_quoted} -netdev {netdev_quoted} ' \
         f'-name {name_quoted} ' \
         '-nographic ' \
-        f'-qmp {socket_quoted}'
+        f'-qmp {socket_quoted} ' \
+        f'-chardev {qga_chardev_quoted} ' \
+        '-device virtio-serial ' \
+        '-device virtserialport,chardev=qga0,name=org.qemu.guest_agent.0'
 
     with tempfile.NamedTemporaryFile(mode='w+t', delete=False) as f:
         f.write('[Unit]\n')
