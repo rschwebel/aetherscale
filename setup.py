@@ -16,7 +16,10 @@ install_requires = [
 
 setup(
     name='aetherscale',
-    packages=['aetherscale'],
+    packages=[
+        'aetherscale',
+        'aetherscale.qemu',
+    ],
     entry_points={
         'console_scripts': [
             'aetherscale=aetherscale.server:main',

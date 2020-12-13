@@ -16,7 +16,7 @@ from typing import List, Optional, Dict, Any, Callable
 
 from . import interfaces
 from . import execution
-from . import qemu
+from .qemu import image, runtime
 from .config import LOG_LEVEL, RABBITMQ_HOST
 
 
@@ -59,7 +59,7 @@ def create_user_image(vm_id: str, image_name: str) -> Path:
         'qemu-img', 'create', '-f', 'qcow2',
         '-b', str(base_image.absolute()), '-F', 'qcow2', str(user_image)])
     if create_img_result.returncode != 0:
-        raise qemu.QemuException(f'Could not create image for VM "{vm_id}"')
+        raise runtime.QemuException(f'Could not create image for VM "{vm_id}"')
 
     return user_image
 
@@ -75,9 +75,9 @@ def list_vms(_: Dict[str, Any]) -> List[Dict[str, Any]]:
             hint = None
             ip_addresses = []
             try:
-                fetcher = qemu.GuestAgentIpAddress(socket_file)
+                fetcher = runtime.GuestAgentIpAddress(socket_file)
                 ip_addresses = fetcher.fetch_ip_addresses()
-            except qemu.QemuException:
+            except runtime.QemuException:
                 hint = 'Could not retrieve IP address for guest'
 
             msg = {
@@ -104,8 +104,12 @@ def create_vm(options: Dict[str, Any]) -> Dict[str, str]:
 
     try:
         user_image = create_user_image(vm_id, image_name)
-    except (OSError, qemu.QemuException):
+    except (OSError, runtime.QemuException):
         raise
+
+    if 'init-script' in options:
+        with image.guestmount(user_image) as guest_fs:
+            image.install_startup_script(options['init-script'], guest_fs)
 
     mac_addr = interfaces.create_mac_address()
     logging.debug(f'Assigning MAC address "{mac_addr}" to VM "{vm_id}"')
@@ -180,7 +184,7 @@ def stop_vm(options: Dict[str, Any]) -> Dict[str, str]:
             execution.stop_systemd_unit(unit_name)
         else:
             qemu_socket = qemu_socket_monitor(vm_id)
-            qm = qemu.QemuMonitor(qemu_socket, protocol=qemu.QemuProtocol.QMP)
+            qm = runtime.QemuMonitor(qemu_socket, protocol=qemu.QemuProtocol.QMP)
             qm.execute('system_powerdown')
 
         response = {

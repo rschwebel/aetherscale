@@ -65,6 +65,9 @@ def main():
     create_vm_parser = subparsers.add_parser('create-vm')
     create_vm_parser.add_argument(
         '--image', help='Name of the image to create a VM from', required=True)
+    create_vm_parser.add_argument(
+        '--init-script', dest='init_script_path',
+        help='Script to execute at first boot of VM', required=False)
     start_vm_parser = subparsers.add_parser('start-vm')
     start_vm_parser.add_argument(
         '--vm-id', dest='vm_id', help='ID of the VM to start', required=True)
@@ -88,12 +91,17 @@ def main():
         }
     elif args.subparser_name == 'create-vm':
         response_expected = True
+
         data = {
             'command': 'create-vm',
             'options': {
                 'image': args.image,
             }
         }
+
+        if args.init_script_path:
+            with open(args.init_script_path, 'rt') as f:
+                data['options']['init-script'] = f.read()
     elif args.subparser_name == 'stop-vm':
         response_expected = True
         data = {

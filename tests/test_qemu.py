@@ -2,13 +2,12 @@ import contextlib
 import json
 from pathlib import Path
 import pytest
-import signal
 import socket
 import tempfile
 import threading
 import uuid
 
-from aetherscale.qemu import QemuMonitor, QemuProtocol
+from aetherscale.qemu.runtime import QemuMonitor, QemuProtocol
 
 
 class MockQemuServer:
