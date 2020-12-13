@@ -1,6 +1,7 @@
 base_images
 user_images
 
+.coverage
 .idea
 .tox
 build
