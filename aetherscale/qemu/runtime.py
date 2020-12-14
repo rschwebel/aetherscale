@@ -6,9 +6,7 @@ import random
 import socket
 from typing import Any, Dict, Optional
 
-
-class QemuException(Exception):
-    pass
+from aetherscale.qemu.exceptions import QemuException
 
 
 class QemuProtocol(enum.Enum):

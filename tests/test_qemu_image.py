@@ -1,18 +1,26 @@
 import os
-from pathlib import Path
+import pytest
 
-from aetherscale.qemu.image import install_startup_script, STARTUP_FILENAME
+from aetherscale.qemu import image
+from aetherscale.qemu.exceptions import QemuException
 
 
-def test_copies_startup_script_to_vm_dir(tmpdir):
-    tmpdir = Path(tmpdir)
-
+def test_copies_startup_script_to_vm_dir(tmppath):
     # Create directories that normally exist in mounted OS
-    (tmpdir / 'etc/systemd/system').mkdir(parents=True, exist_ok=True)
-    (tmpdir / 'root').mkdir(parents=True, exist_ok=True)
+    (tmppath / 'etc/systemd/system').mkdir(parents=True, exist_ok=True)
+    (tmppath / 'root').mkdir(parents=True, exist_ok=True)
 
-    install_startup_script('echo something', tmpdir)
+    image.install_startup_script('echo something', tmppath)
 
-    assert os.path.isfile(tmpdir / f'root/{STARTUP_FILENAME}.sh')
+    assert os.path.isfile(tmppath / f'root/{image.STARTUP_FILENAME}.sh')
     assert os.path.isfile(
-        tmpdir / f'etc/systemd/system/{STARTUP_FILENAME}.service')
+        tmppath / f'etc/systemd/system/{image.STARTUP_FILENAME}.service')
+
+
+def test_mount_invalid_image(tmppath):
+    imagepath = tmppath / 'image.qcow2'
+    imagepath.touch()
+
+    with pytest.raises(QemuException):
+        with image.guestmount(imagepath):
+            pass

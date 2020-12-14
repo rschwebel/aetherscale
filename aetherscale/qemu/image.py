@@ -8,6 +8,7 @@ import tempfile
 from typing import List, TextIO, Iterator
 
 from aetherscale.execution import run_command_chain
+from aetherscale.qemu.exceptions import QemuException
 import aetherscale.timing
 
 
@@ -20,8 +21,12 @@ def guestmount(image_path: Path) -> Iterator[Path]:
 
     logging.debug(f'Mounting {image_path} at {mount_dir}')
     try:
-        run_command_chain([
+        success = run_command_chain([
             ['guestmount', '-a', str(image_path.absolute()), '-i', mount_dir]])
+
+        if not success:
+            raise QemuException(f'Could not mount image {image_path}')
+
         yield Path(mount_dir)
     finally:
         logging.debug(f'Unmounting {mount_dir}')
