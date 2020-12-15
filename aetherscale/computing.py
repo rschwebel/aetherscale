@@ -385,4 +385,7 @@ def run():
         logging.error('Failed to start VDE networking.')
         sys.exit(1)
 
-    channel.start_consuming()
+    try:
+        channel.start_consuming()
+    except KeyboardInterrupt:
+        print('Keyboard interrupt, stopping service')
