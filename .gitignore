@@ -7,5 +7,6 @@ user_images
 build
 dist
 env
+htmlcov
 __pycache__
 *.egg-info
