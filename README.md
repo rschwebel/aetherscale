@@ -68,6 +68,25 @@ Components which I think would be interesting to develop are:
 - Virtual Servers (probably qemu)
   - IPv6-only intranet to learn IPv6
 
+### Creating VMs
+
+When you want to create a new VM, you have to use a *base image*. This is an
+already prepared QEMU image in `qcow2` format that will be used to start your
+machine.
+
+You can define a custom script that is run on the first start of the machine.
+This can be used to install additional software or to configure software.
+The init-script is run by systemd and its output can be monitored with
+
+```bash
+journalctl -f -u aetherscale-init
+```
+
+Execution after the first boot of the machine is prohibited by a conditions
+file (cf. in `/etc/systemd/system/aetherscale-init.service`). If you
+want to run your script during another boot, you can delete the conditions
+file.
+
 ## Architecture
 
 My idea is that all requests to the system go through a central message
