@@ -71,8 +71,6 @@ def install_startup_script(script_source: str, mount_dir: Path):
 
 def create_systemd_startup_unit(
         f: TextIO, startup_script: Path):
-    # TODO: init-script must only be run on first boot e.g. with Conditions
-    # and a depending unit could write a marker file
     logging.debug(f'Creating systemd init-script service at {startup_script}')
 
     condition_file = f'/root/{STARTUP_FILENAME}.done'
