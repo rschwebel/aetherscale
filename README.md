@@ -21,6 +21,16 @@ virtualenv venv && source venv/bin/activate
 pip install -e .
 ```
 
+### Operating System Changes
+
+I am trying to design aetherscale to run without root permissions for
+as much as possible.
+For some actions more permissions than a standard user usually has are
+needed, though. This section will guide you through all of the changes
+required to allow aetherscale itself to run as a standard user.
+
+#### Bridge Networking
+
 Before you can start using the server you need to setup a TAP device to which
 VDE networking can connect. This is needed so that the started VMs can
 join the network. To be able to create a TAP device that is connected to your
@@ -35,6 +45,73 @@ bin/setup-tap-vde.sh -u USER -i IP_ADDRESS -g GATEWAY -e PHYSICAL_DEVICE
 # For example
 bin/setup-tap-vde.sh -u username -i 192.168.0.10/24 -g 192.168.0.1 -e eth0
 ```
+
+#### VPN Networking
+
+It's possible to connect different VMs on possibly different hosts with a VPN.
+For each virtual network a tinc instance is started.
+
+This means that we have to create an unknown number of networks dynamically
+upon user request. To somehow solve the problem that as a standard user we
+cannot modify network devices without the `CAP_NET_ADMIN` capability, we
+create a pre-defined number of unconfigured network devices `net-vpn-1` to
+`net-vpn-k`.
+The mapping between the dummy VPN devices and user-chosen VPN names is then
+done by aetherscale.
+
+To create the dummy VPN interfaces (including bridging) run:
+
+```bash
+bin/setup-vpn-tap-vde.sh -u username -n 10 -p 2001:db8:85a3 
+```
+
+`-p` defines the IPv6 prefix from which submasks for private subnets will be
+chosen. It must be a `/48` prefix from which each VPN will receive a `/64`
+prefix.
+
+This is not a nice solution and ideally network interfaces should be
+created on-the-fly, but Linux capabilities inheritance to subprocesses
+seems quite complicated, and without inheritance we'd have to grant
+`CAP_NET_ADMIN` to both `ip` and `tincd`. This might be undesired, because
+then any user can change network devices. Another option could be to
+assign `CAP_NET_ADMIN` to the user running aetherscale, but this seems to
+[require changes to pam](https://unix.stackexchange.com/questions/454708/how-do-you-add-cap-sys-admin-permissions-to-user-in-centos-7)
+and still seems to require inheritable capabilities to be set on each
+binary that is to be executed.
+While this in my opinion would be a reasonable choice for a production
+program, it feels too heavy for a proof-of-concept tool.
+
+For IPv6 auto-configuration you must have a program for router
+advertisement running, e.g. radvd. Since radvd requires `CAP_NET_RAW`,
+you'll have to run it externally from aetherscale, aetherscale cannot
+autostart it.
+
+An example configuration file for two pre-configured subnets could look like:
+
+```
+interface aeth-vpnbr-1 {
+  AdvSendAdvert on;
+  MinRtrAdvInterval 3;
+  MaxRtrAdvInterval 10;
+  prefix ::/64 {
+    AdvOnLink on;
+    AdvAutonomous on;
+    AdvRouterAddr off;
+  };
+};
+
+interface aeth-vpnbr-2 {
+  AdvSendAdvert on;
+  MinRtrAdvInterval 3;
+  MaxRtrAdvInterval 10;
+  prefix ::/64 {
+    AdvOnLink on;
+    AdvAutonomous on;
+    AdvRouterAddr off;
+  };
+};
+```
+
 
 ## Usage
 

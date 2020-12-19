@@ -68,6 +68,8 @@ def main():
     create_vm_parser.add_argument(
         '--init-script', dest='init_script_path',
         help='Script to execute at first boot of VM', required=False)
+    create_vm_parser.add_argument(
+        '--vpn', help='Name of the VPN to startup/join', required=False)
     start_vm_parser = subparsers.add_parser('start-vm')
     start_vm_parser.add_argument(
         '--vm-id', dest='vm_id', help='ID of the VM to start', required=True)
@@ -98,6 +100,9 @@ def main():
                 'image': args.image,
             }
         }
+
+        if args.vpn:
+            data['options']['vpn'] = args.vpn
 
         if args.init_script_path:
             with open(args.init_script_path, 'rt') as f:

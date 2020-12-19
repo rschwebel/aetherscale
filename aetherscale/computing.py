@@ -19,6 +19,7 @@ from .qemu import image, runtime
 from .qemu.exceptions import QemuException
 from . import config
 from . import services
+from .vpn.tinc import TincVirtualNetwork
 
 
 VDE_FOLDER = '/tmp/vde.ctl'
@@ -64,16 +65,24 @@ def create_user_image(vm_id: str, image_name: str) -> Path:
 
 
 @dataclass
+class QemuInterfaceConfig:
+    mac_address: str
+    vde_folder: Path
+
+
+@dataclass
 class QemuStartupConfig:
     vm_id: str
     hda_image: Path
-    mac_addr: str
-    vde_folder: Path
+    interfaces: List[QemuInterfaceConfig]
 
 
 class ComputingHandler:
     def __init__(self, service_manager: services.ServiceManager):
         self.service_manager = service_manager
+
+        self.unused_vpn_interfaces = set()
+        self.vpn_interface_map = {}
 
     def list_vms(self, _: Dict[str, Any]) -> List[Dict[str, Any]]:
         vms = []
@@ -121,14 +130,34 @@ class ComputingHandler:
             with image.guestmount(user_image) as guest_fs:
                 image.install_startup_script(options['init-script'], guest_fs)
 
+        qemu_interfaces = []
+
+        if 'vpn' in options:
+            vde_socket_vpn = self._establish_vpn(options['vpn'])
+
+            mac_addr_vpn = interfaces.create_mac_address()
+            logging.debug(
+                f'Assigning MAC address "{mac_addr_vpn}" to '
+                f'VM "{vm_id}" for VPN')
+
+            privnet = QemuInterfaceConfig(
+                mac_address=mac_addr_vpn,
+                vde_folder=vde_socket_vpn)
+            qemu_interfaces.append(privnet)
+
         mac_addr = interfaces.create_mac_address()
         logging.debug(f'Assigning MAC address "{mac_addr}" to VM "{vm_id}"')
+
+        pubnet = QemuInterfaceConfig(
+            mac_address=mac_addr,
+            vde_folder=Path(VDE_FOLDER))
+        qemu_interfaces.append(pubnet)
 
         qemu_config = QemuStartupConfig(
             vm_id=vm_id,
             hda_image=user_image,
-            mac_addr=mac_addr,
-            vde_folder=Path(VDE_FOLDER))
+            interfaces=qemu_interfaces)
+
         unit_name = systemd_unit_name_for_vm(vm_id)
         self._create_qemu_systemd_unit(unit_name, qemu_config)
         self.service_manager.start_service(unit_name)
@@ -226,30 +255,36 @@ class ComputingHandler:
 
     def _create_qemu_systemd_unit(
             self, unit_name: str, qemu_config: QemuStartupConfig):
-        hda_quoted = shlex.quote(str(qemu_config.hda_image.absolute()))
-        device_quoted = shlex.quote(
-            f'virtio-net-pci,netdev=pubnet,mac={qemu_config.mac_addr}')
-        netdev_quoted = shlex.quote(
-            f'vde,id=pubnet,sock={str(qemu_config.vde_folder)}')
-        name_quoted = shlex.quote(
-            f'qemu-vm-{qemu_config.vm_id},process=vm-{qemu_config.vm_id}')
-
+        qemu_name = \
+            f'qemu-vm-{qemu_config.vm_id},process=vm-{qemu_config.vm_id}'
         qemu_monitor_path = qemu_socket_monitor(qemu_config.vm_id)
-        socket_quoted = shlex.quote(f'unix:{qemu_monitor_path},server,nowait')
-
         qga_monitor_path = qemu_socket_guest_agent(qemu_config.vm_id)
-        qga_chardev_quoted = shlex.quote(
-            f'socket,path={qga_monitor_path},server,nowait,id=qga0')
+        qga_chardev = f'socket,path={qga_monitor_path},server,nowait,id=qga0'
 
-        command = \
-            f'qemu-system-x86_64 -m 4096 -accel kvm -hda {hda_quoted} ' \
-            f'-device {device_quoted} -netdev {netdev_quoted} ' \
-            f'-name {name_quoted} ' \
-            '-nographic ' \
-            f'-qmp {socket_quoted} ' \
-            f'-chardev {qga_chardev_quoted} ' \
-            '-device virtio-serial ' \
-            '-device virtserialport,chardev=qga0,name=org.qemu.guest_agent.0'
+        command = [
+            'qemu-system-x86_64',
+            '-cpu', 'host',
+            '-m', '4096',
+            '-accel', 'kvm',
+            '-hda', str(qemu_config.hda_image.absolute()),
+            '-name', qemu_name,
+            '-nographic',
+            '-qmp', f'unix:{qemu_monitor_path},server,nowait',
+            '-chardev', qga_chardev,
+            '-device', 'virtio-serial',
+            '-device',
+            'virtserialport,chardev=qga0,name=org.qemu.guest_agent.0',
+        ]
+
+        for i, interface in enumerate(qemu_config.interfaces):
+            device = \
+                f'virtio-net-pci,netdev=net{i},mac={interface.mac_address}'
+            netdev = f'vde,id=net{i},sock={str(interface.vde_folder)}'
+
+            command += ['-device', device, '-netdev', netdev]
+
+        command = [shlex.quote(arg) for arg in command]
+        command = ' '.join(command)
 
         with tempfile.NamedTemporaryFile(mode='w+t', delete=False) as f:
             f.write('[Unit]\n')
@@ -263,6 +298,38 @@ class ComputingHandler:
 
         self.service_manager.install_service(Path(f.name), unit_name)
         os.remove(f.name)
+
+    def _establish_vpn(self, vpn_name: str) -> Path:
+        logging.info(f'Bringing up VDE networking for VPN {vpn_name}')
+        vde_socket_vpn = f'/tmp/vde-{vpn_name}.ctl'
+        vde_socket_quoted = shlex.quote(vde_socket_vpn)
+        service_name = f'aetherscale-vde-vpn-{vpn_name}.service'
+        self.service_manager.install_simple_service(
+            f'/usr/bin/vde_switch -tap tap-vde -s {vde_socket_quoted}',
+            service_name)
+
+        self.service_manager.start_service(service_name)
+        # Give systemd a bit time to start VDE
+        time.sleep(0.5)
+        if not self.service_manager.service_is_running(service_name):
+            logging.error('Failed to start VDE networking for VPN.')
+            sys.exit(1)
+
+        logging.info(f'Using VPN {vpn_name}')
+
+        if len(self.unused_vpn_interfaces) == 0:
+            raise RuntimeError('No more free VPN interfaces.')
+
+        interface = self.unused_vpn_interfaces.pop()
+        self.vpn_interface_map[vpn_name] = interface
+
+        vpn = TincVirtualNetwork(
+            vpn_name, config.VPN_CONFIG_FOLDER, interface, self.service_manager)
+        vpn.create_config('localhost')  # TODO: Use actual hostname
+        vpn.gen_keypair()
+        vpn.start_daemon()
+
+        return Path(vde_socket_vpn)
 
 
 def get_process_for_vm(vm_id: str) -> Optional[psutil.Process]:
@@ -315,6 +382,7 @@ def callback(ch, method, properties, body, handler: ComputingHandler):
             'response': response,
         }
     except Exception as e:
+        logging.exception('Unhandled exception')
         resp_message = {
             'execution-info': {
                 'status': 'error',
@@ -336,6 +404,9 @@ def callback(ch, method, properties, body, handler: ComputingHandler):
 
 
 def run():
+    for i in range(1, config.VPN_NUM_PREPARED_INTERFACES + 1):
+        UNUSED_VPN_INTERFACES.add(f'aeth-vpntnc-{i}')
+
     connection = pika.BlockingConnection(
         pika.ConnectionParameters(host=config.RABBITMQ_HOST))
     channel = connection.channel()
