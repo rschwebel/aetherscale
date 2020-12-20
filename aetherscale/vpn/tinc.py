@@ -5,15 +5,20 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 from typing import Optional
 
 from aetherscale.services import ServiceManager
+import aetherscale.config
+
+
+class VpnException(Exception):
+    pass
 
 
 class TincVirtualNetwork(object):
     def __init__(
             self, netname: str, config_folder: Path,
-            interface_name: str,
             service_manager: ServiceManager):
         if not self._validate_netname(netname):
             raise ValueError(
@@ -22,15 +27,21 @@ class TincVirtualNetwork(object):
         self.netname = netname
         self.config_base_folder = config_folder
         self.service_manager = service_manager
+        # TODO: To support multi VPN each VPN has to use another port
+        self.port = 20000
 
-        self.assigned_interface_name = interface_name
+        self.pidfile = Path(tempfile.gettempdir()) / f'tincd-{self.netname}.run'
 
     def network_exists(self) -> bool:
         return self._net_config_folder().is_dir()
 
     @property
     def interface_name(self):
-        return self.assigned_interface_name
+        return f'tinc-{self.netname}'
+
+    @property
+    def bridge_interface_name(self):
+        return f'tincbr-{self.netname}'
 
     def create_config(self, hostname: str):
         if not re.match('^[a-z0-9]+$', hostname):
@@ -44,6 +55,7 @@ class TincVirtualNetwork(object):
                 f'Name = {hostname}\n',
                 'Mode = switch\n',
                 f'Interface = {self.interface_name}\n',
+                f'Port = {self.port}\n',
             ]
             f.writelines(lines)
 
@@ -77,25 +89,60 @@ class TincVirtualNetwork(object):
         logging.debug('Finished generating key pair')
 
     def _validate_netname(self, netname: str):
-        return re.match('^[a-z0-9]+$', netname)
+        if not re.match('^[a-z0-9]+$', netname):
+            return False
+        if len(netname) > 8:
+            return False
+
+        return True
 
     def _net_config_folder(self) -> Path:
         return self.config_base_folder / self.netname
 
     def _service_name(self) -> str:
-        return f'tincd-{self.netname}.service'
+        return f'aetherscale-tincd-{self.netname}.service'
 
     def start_daemon(self):
-        net_dir_escaped = shlex.quote(str(self._net_config_folder()))
+        net_dir_quoted = shlex.quote(str(self._net_config_folder()))
+        interface_name_quoted = shlex.quote(self.interface_name)
+        pidfile_quoted = shlex.quote(str(self.pidfile))
+        bridge_name_quoted = shlex.quote(self.bridge_interface_name)
 
         service_name = self._service_name()
+        with tempfile.NamedTemporaryFile('wt') as f:
+            f.write('[Unit]\n')
+            f.write(f'Description=aetherscale {self.netname} VPN with tincd\n')
+            f.write('\n')
+            f.write('[Service]\n')
+            # Create an uninitialized tap device so that tincd can run
+            # without root permissions
+            # TODO: These commands are only needed once per boot of the host, so
+            # this should be handled by the aetherscale daemon once it comes
+            # up
+            f.write(
+                f'ExecStartPre=sudo ip link add {bridge_name_quoted} type bridge\n'
+                f'ExecStartPre=sudo ip tuntap add {interface_name_quoted} '
+                f'mode tap user {aetherscale.config.USER}\n'
+                f'ExecStartPre=sudo ip link set {bridge_name_quoted} up\n'
+                f'ExecStartPre=sudo ip link set {interface_name_quoted} up\n'
+                f'ExecStartPre=sudo ip link set {interface_name_quoted} '
+                f'master {bridge_name_quoted}\n')
+            f.write(
+                f'ExecStart=tincd -D -c {net_dir_quoted} '
+                f'--pidfile {pidfile_quoted}\n')
+            f.write('\n')
+            f.write('[Install]\n')
+            f.write('WantedBy=default.target\n')
 
-        self.service_manager.install_simple_service(
-            command=f'tincd -D -d {net_dir_escaped}',
-            service_name=service_name,
-            description=f'aetherscale {self.netname} VPN with tincd')
+            f.flush()
 
-        self.service_manager.start_service(service_name)
+            logging.debug(f'Installing tinc VPN service "{service_name}"')
+            self.service_manager.install_service(Path(f.name), service_name)
+
+        self.service_manager.enable_service(service_name)
+        success = self.service_manager.start_service(service_name)
+        if not success:
+            raise VpnException(f'Could not establish VPN "{self.netname}"')
 
     def teardown_tinc_config(self):
         self.service_manager.uninstall_service(self._service_name())

@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 import logging
 import json
 import os
@@ -19,7 +18,9 @@ from .qemu import image, runtime
 from .qemu.exceptions import QemuException
 from . import config
 from . import services
-from .vpn.tinc import TincVirtualNetwork
+from .vpn.tinc import TincVirtualNetwork, VpnException
+from .execution import run_command_chain
+import aetherscale.vpn.radvd
 
 
 VDE_FOLDER = '/tmp/vde.ctl'
@@ -31,6 +32,8 @@ QUEUE_COMMANDS_MAP = {
     '': ['list-vms', 'start-vm', 'stop-vm', 'delete-vm'],
     COMPETING_QUEUE: ['create-vm'],
 }
+
+RADVD_SERVICE_NAME = 'aetherscale-radvd.service'
 
 logging.basicConfig(level=config.LOG_LEVEL)
 
@@ -49,7 +52,6 @@ def qemu_socket_guest_agent(vm_id: str) -> Path:
 
 def create_user_image(vm_id: str, image_name: str) -> Path:
     base_image = config.BASE_IMAGE_FOLDER / f'{image_name}.qcow2'
-    print(base_image)
     if not base_image.is_file():
         raise IOError(f'Image "{image_name}" does not exist')
 
@@ -64,25 +66,15 @@ def create_user_image(vm_id: str, image_name: str) -> Path:
     return user_image
 
 
-@dataclass
-class QemuInterfaceConfig:
-    mac_address: str
-    vde_folder: Path
-
-
-@dataclass
-class QemuStartupConfig:
-    vm_id: str
-    hda_image: Path
-    interfaces: List[QemuInterfaceConfig]
-
-
 class ComputingHandler:
-    def __init__(self, service_manager: services.ServiceManager):
+    def __init__(
+            self, radvd: aetherscale.vpn.radvd.Radvd,
+            service_manager: services.ServiceManager):
+
+        self.radvd = radvd
         self.service_manager = service_manager
 
-        self.unused_vpn_interfaces = set()
-        self.vpn_interface_map = {}
+        self.established_vpns: Dict[str, TincVirtualNetwork] = {}
 
     def list_vms(self, _: Dict[str, Any]) -> List[Dict[str, Any]]:
         vms = []
@@ -133,27 +125,30 @@ class ComputingHandler:
         qemu_interfaces = []
 
         if 'vpn' in options:
-            vde_socket_vpn = self._establish_vpn(options['vpn'])
+            # TODO: Do we have to assign the VPN mac addr to the macvtap?
+            vpn_tap_device = self._establish_vpn(options['vpn'], vm_id)
 
             mac_addr_vpn = interfaces.create_mac_address()
             logging.debug(
                 f'Assigning MAC address "{mac_addr_vpn}" to '
                 f'VM "{vm_id}" for VPN')
 
-            privnet = QemuInterfaceConfig(
+            privnet = runtime.QemuInterfaceConfig(
                 mac_address=mac_addr_vpn,
-                vde_folder=vde_socket_vpn)
+                type=runtime.QemuInterfaceType.TAP,
+                tap_device=vpn_tap_device)
             qemu_interfaces.append(privnet)
 
         mac_addr = interfaces.create_mac_address()
         logging.debug(f'Assigning MAC address "{mac_addr}" to VM "{vm_id}"')
 
-        pubnet = QemuInterfaceConfig(
+        pubnet = runtime.QemuInterfaceConfig(
             mac_address=mac_addr,
+            type=runtime.QemuInterfaceType.VDE,
             vde_folder=Path(VDE_FOLDER))
         qemu_interfaces.append(pubnet)
 
-        qemu_config = QemuStartupConfig(
+        qemu_config = runtime.QemuStartupConfig(
             vm_id=vm_id,
             hda_image=user_image,
             interfaces=qemu_interfaces)
@@ -233,6 +228,9 @@ class ComputingHandler:
         return response
 
     def delete_vm(self, options: Dict[str, Any]) -> Dict[str, str]:
+        # TODO: Once all VMs of a VPN on a host have been deleted, we can delete
+        # the associated VPN
+
         try:
             vm_id = options['vm-id']
         except KeyError:
@@ -254,7 +252,7 @@ class ComputingHandler:
         }
 
     def _create_qemu_systemd_unit(
-            self, unit_name: str, qemu_config: QemuStartupConfig):
+            self, unit_name: str, qemu_config: runtime.QemuStartupConfig):
         qemu_name = \
             f'qemu-vm-{qemu_config.vm_id},process=vm-{qemu_config.vm_id}'
         qemu_monitor_path = qemu_socket_monitor(qemu_config.vm_id)
@@ -263,12 +261,12 @@ class ComputingHandler:
 
         command = [
             'qemu-system-x86_64',
+            '-nographic',
             '-cpu', 'host',
             '-m', '4096',
             '-accel', 'kvm',
             '-hda', str(qemu_config.hda_image.absolute()),
             '-name', qemu_name,
-            '-nographic',
             '-qmp', f'unix:{qemu_monitor_path},server,nowait',
             '-chardev', qga_chardev,
             '-device', 'virtio-serial',
@@ -279,7 +277,16 @@ class ComputingHandler:
         for i, interface in enumerate(qemu_config.interfaces):
             device = \
                 f'virtio-net-pci,netdev=net{i},mac={interface.mac_address}'
-            netdev = f'vde,id=net{i},sock={str(interface.vde_folder)}'
+
+            if interface.type == runtime.QemuInterfaceType.VDE:
+                netdev = f'vde,id=net{i},sock={str(interface.vde_folder)}'
+            elif interface.type == runtime.QemuInterfaceType.TAP:
+                netdev = \
+                    f'tap,id=net{i},ifname={interface.tap_device},' \
+                    'script=no,downscript=no'
+            else:
+                raise QemuException(
+                    f'Unknown interface type "{interface.type}"')
 
             command += ['-device', device, '-netdev', netdev]
 
@@ -299,37 +306,44 @@ class ComputingHandler:
         self.service_manager.install_service(Path(f.name), unit_name)
         os.remove(f.name)
 
-    def _establish_vpn(self, vpn_name: str) -> Path:
-        logging.info(f'Bringing up VDE networking for VPN {vpn_name}')
-        vde_socket_vpn = f'/tmp/vde-{vpn_name}.ctl'
-        vde_socket_quoted = shlex.quote(vde_socket_vpn)
-        service_name = f'aetherscale-vde-vpn-{vpn_name}.service'
-        self.service_manager.install_simple_service(
-            f'/usr/bin/vde_switch -tap tap-vde -s {vde_socket_quoted}',
-            service_name)
+    def _establish_vpn(self, vpn_name: str, vm_id: str) -> str:
+        if vpn_name in self.established_vpns:
+            vpn = self.established_vpns[vpn_name]
+        else:
+            logging.info(f'Creating VPN {vpn_name}')
 
-        self.service_manager.start_service(service_name)
-        # Give systemd a bit time to start VDE
-        time.sleep(0.5)
-        if not self.service_manager.service_is_running(service_name):
-            logging.error('Failed to start VDE networking for VPN.')
-            sys.exit(1)
+            vpn = TincVirtualNetwork(
+                vpn_name, config.VPN_CONFIG_FOLDER, self.service_manager)
+            vpn.create_config(config.HOSTNAME)
+            vpn.gen_keypair()
+            vpn.start_daemon()
 
-        logging.info(f'Using VPN {vpn_name}')
+            self.established_vpns[vpn_name] = vpn
 
-        if len(self.unused_vpn_interfaces) == 0:
-            raise RuntimeError('No more free VPN interfaces.')
+        # Create a new tap device for the VM to use
+        # TODO: Must be re-established after a host reboot
+        # TODO: Create a dedicated module for net management
+        associated_tap_device = 'vpn-' + vm_id
+        success = run_command_chain([[
+            'sudo', 'ip', 'tuntap', 'add', 'dev', associated_tap_device,
+            'mode', 'tap', 'user', config.USER
+        ], [
+            'sudo', 'ip', 'link', 'set', 'dev', associated_tap_device, 'up',
+        ], [
+            'sudo', 'ip', 'link', 'set', associated_tap_device,
+            'master', vpn.bridge_interface_name
+        ]])
+        if not success:
+            raise VpnException('Could not setup macvtap for VPN "{vpn_name}"')
 
-        interface = self.unused_vpn_interfaces.pop()
-        self.vpn_interface_map[vpn_name] = interface
+        prefix = self.radvd.generate_prefix()
+        self.radvd.add_interface(vpn.bridge_interface_name, prefix)
+        self.service_manager.restart_service(RADVD_SERVICE_NAME)
+        logging.debug(
+            f'Added device {vpn.bridge_interface_name} to radvd '
+            f'with IPv6 address range {prefix}')
 
-        vpn = TincVirtualNetwork(
-            vpn_name, config.VPN_CONFIG_FOLDER, interface, self.service_manager)
-        vpn.create_config('localhost')  # TODO: Use actual hostname
-        vpn.gen_keypair()
-        vpn.start_daemon()
-
-        return Path(vde_socket_vpn)
+        return associated_tap_device
 
 
 def get_process_for_vm(vm_id: str) -> Optional[psutil.Process]:
@@ -404,9 +418,6 @@ def callback(ch, method, properties, body, handler: ComputingHandler):
 
 
 def run():
-    for i in range(1, config.VPN_NUM_PREPARED_INTERFACES + 1):
-        UNUSED_VPN_INTERFACES.add(f'aeth-vpntnc-{i}')
-
     connection = pika.BlockingConnection(
         pika.ConnectionParameters(host=config.RABBITMQ_HOST))
     channel = connection.channel()
@@ -429,7 +440,14 @@ def run():
 
     systemd_path = Path.home() / '.config/systemd/user'
     service_manager = services.SystemdServiceManager(systemd_path)
-    handler = ComputingHandler(service_manager)
+    radvd = aetherscale.vpn.radvd.Radvd(
+        config.AETHERSCALE_CONFIG_DIR / 'radvd.conf', config.VPN_48_PREFIX)
+    service_manager.install_simple_service(
+        radvd.get_start_command(), service_name=RADVD_SERVICE_NAME,
+        description='IPv6 Router Advertisment for VPNs')
+    service_manager.start_service(RADVD_SERVICE_NAME)
+
+    handler = ComputingHandler(radvd, service_manager)
 
     bound_callback = lambda ch, method, properties, body: \
         callback(ch, method, properties, body, handler)

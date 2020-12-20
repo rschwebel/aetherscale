@@ -1,12 +1,33 @@
+from dataclasses import dataclass
 import enum
 import logging
 import json
 from pathlib import Path
 import random
 import socket
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 from aetherscale.qemu.exceptions import QemuException
+
+
+class QemuInterfaceType(enum.Enum):
+    TAP = enum.auto()
+    VDE = enum.auto()
+
+
+@dataclass
+class QemuInterfaceConfig:
+    mac_address: str
+    type: QemuInterfaceType
+    vde_folder: Optional[Path] = None
+    tap_device: Optional[str] = None
+
+
+@dataclass
+class QemuStartupConfig:
+    vm_id: str
+    hda_image: Path
+    interfaces: List[QemuInterfaceConfig]
 
 
 class QemuProtocol(enum.Enum):

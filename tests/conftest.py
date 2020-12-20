@@ -56,6 +56,9 @@ def mock_service_manager():
 
             return True
 
+        def restart_service(self, service_name: str) -> bool:
+            return True
+
         def enable_service(self, service_name: str) -> bool:
             self.enabled_services.add(service_name)
             return True

@@ -33,6 +33,10 @@ class ServiceManager(ABC):
         """Stop a service"""
 
     @abstractmethod
+    def restart_service(self, service_name: str) -> bool:
+        """Restart a service"""
+
+    @abstractmethod
     def enable_service(self, service_name: str) -> bool:
         """Enable a service so that it will be auto-started on reboots"""
 
@@ -113,6 +117,11 @@ class SystemdServiceManager(ServiceManager):
     def stop_service(self, service_name: str) -> bool:
         return run_command_chain([
             ['systemctl', '--user', 'stop', service_name],
+        ])
+
+    def restart_service(self, service_name: str) -> bool:
+        return run_command_chain([
+            ['systemctl', '--user', 'restart', service_name],
         ])
 
     def enable_service(self, service_name: str) -> bool:
