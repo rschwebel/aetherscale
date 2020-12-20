@@ -5,7 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-from typing import List, TextIO, Iterator
+from typing import TextIO, Iterator
 
 from aetherscale.execution import run_command_chain
 from aetherscale.qemu.exceptions import QemuException
@@ -78,6 +78,8 @@ def create_systemd_startup_unit(
     f.write('[Unit]\n')
     f.write('Description=aetherscale VM init script\n')
     f.write(f'ConditionPathExists=!{condition_file}\n')
+    f.write('Wants=network-online.target\n')
+    f.write('After=network-online.target\n')
     f.write('\n')
     f.write('[Service]\n')
     f.write('Type=oneshot\n')
