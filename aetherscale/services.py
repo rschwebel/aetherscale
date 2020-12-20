@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import shutil
 import subprocess
+from typing import Optional
 
 from aetherscale.execution import run_command_chain
 
@@ -10,6 +11,14 @@ class ServiceManager(ABC):
     @abstractmethod
     def install_service(self, config_file: Path, service_name: str) -> bool:
         """Installs a service on the system for possible activation"""
+
+    @abstractmethod
+    def install_simple_service(
+            self, command: str, service_name: str,
+            description: Optional[str] = None) -> bool:
+        """Installs a simple service for a binary. This function allows us
+        to make service manager easy to replace, because unlike install_service
+        it does not need a service-specific configuration file as input."""
 
     @abstractmethod
     def uninstall_service(self, service_name: str) -> bool:
@@ -22,6 +31,10 @@ class ServiceManager(ABC):
     @abstractmethod
     def stop_service(self, service_name: str) -> bool:
         """Stop a service"""
+
+    @abstractmethod
+    def restart_service(self, service_name: str) -> bool:
+        """Restart a service"""
 
     @abstractmethod
     def enable_service(self, service_name: str) -> bool:
@@ -56,7 +69,33 @@ class SystemdServiceManager(ServiceManager):
         except OSError:
             return False
 
-        # Reload system
+        # Reload systemd
+        r = subprocess.run(['systemctl', '--user', 'daemon-reload'])
+        return r.returncode == 0
+
+    def install_simple_service(
+            self, command: str, service_name: str,
+            description: Optional[str] = None) -> bool:
+        if '.' not in service_name:
+            raise ValueError('Unit name must contain the suffix, e.g. .service')
+
+        target_unit_path = self._systemd_unit_path(service_name)
+        target_unit_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if not description:
+            description = f'aetherscale {service_name}'
+
+        with open(target_unit_path, 'wt') as f:
+            f.write('[Unit]\n')
+            f.write(f'Description={description}\n')
+            f.write('\n')
+            f.write('[Service]\n')
+            f.write(f'ExecStart={command}\n')
+            f.write('\n')
+            f.write('[Install]\n')
+            f.write('WantedBy=default.target\n')
+
+        # Reload systemd
         r = subprocess.run(['systemctl', '--user', 'daemon-reload'])
         return r.returncode == 0
 
@@ -78,6 +117,11 @@ class SystemdServiceManager(ServiceManager):
     def stop_service(self, service_name: str) -> bool:
         return run_command_chain([
             ['systemctl', '--user', 'stop', service_name],
+        ])
+
+    def restart_service(self, service_name: str) -> bool:
+        return run_command_chain([
+            ['systemctl', '--user', 'restart', service_name],
         ])
 
     def enable_service(self, service_name: str) -> bool:

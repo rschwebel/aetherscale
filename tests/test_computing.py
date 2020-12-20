@@ -36,7 +36,9 @@ def test_vm_lifecycle(tmppath, mock_service_manager: ServiceManager):
     with mock.patch('aetherscale.config.BASE_IMAGE_FOLDER', tmppath), \
             mock.patch('aetherscale.config.USER_IMAGE_FOLDER', tmppath):
 
-        handler = computing.ComputingHandler(mock_service_manager)
+        handler = computing.ComputingHandler(
+            radvd=mock.MagicMock(), service_manager=mock_service_manager)
+
         with base_image(tmppath) as img:
             result = handler.create_vm({'image': img.stem})
             vm_id = result['vm-id']
@@ -65,7 +67,8 @@ def test_run_missing_base_image(tmppath, mock_service_manager: ServiceManager):
     with mock.patch('aetherscale.config.BASE_IMAGE_FOLDER', tmppath), \
              mock.patch('aetherscale.config.USER_IMAGE_FOLDER', tmppath):
 
-        handler = computing.ComputingHandler(mock_service_manager)
+        handler = computing.ComputingHandler(
+            radvd=mock.MagicMock(), service_manager=mock_service_manager)
 
         # specify invalid base image
         with pytest.raises(OSError):

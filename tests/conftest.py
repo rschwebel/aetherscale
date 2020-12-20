@@ -1,6 +1,6 @@
 from pathlib import Path
-
 import pytest
+from typing import Optional
 
 from aetherscale.services import ServiceManager
 import aetherscale.timing
@@ -28,6 +28,12 @@ def mock_service_manager():
             self.services.add(service_name)
             return True
 
+        def install_simple_service(
+                self, command: str, service_name: str,
+                description: Optional[str] = None) -> bool:
+            self.services.add(service_name)
+            return True
+
         def uninstall_service(self, service_name: str) -> bool:
             try:
                 self.services.remove(service_name)
@@ -48,6 +54,9 @@ def mock_service_manager():
                 # should not fail if was already stopped
                 pass
 
+            return True
+
+        def restart_service(self, service_name: str) -> bool:
             return True
 
         def enable_service(self, service_name: str) -> bool:

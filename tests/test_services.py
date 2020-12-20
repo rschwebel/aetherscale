@@ -29,6 +29,7 @@ def test_systemd_calls_system_binary(subprocess_run, tmppath):
         (systemd.disable_service, 'disable'),
         (systemd.start_service, 'start'),
         (systemd.stop_service, 'stop'),
+        (systemd.restart_service, 'restart'),
         (systemd.service_is_running, 'is-active'),
     ]
 
