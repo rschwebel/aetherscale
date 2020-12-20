@@ -9,7 +9,6 @@ import tempfile
 from typing import Optional
 
 from aetherscale.services import ServiceManager
-import aetherscale.config
 
 
 class VpnException(Exception):
@@ -104,9 +103,7 @@ class TincVirtualNetwork(object):
 
     def start_daemon(self):
         net_dir_quoted = shlex.quote(str(self._net_config_folder()))
-        interface_name_quoted = shlex.quote(self.interface_name)
         pidfile_quoted = shlex.quote(str(self.pidfile))
-        bridge_name_quoted = shlex.quote(self.bridge_interface_name)
 
         service_name = self._service_name()
         with tempfile.NamedTemporaryFile('wt') as f:
@@ -114,19 +111,6 @@ class TincVirtualNetwork(object):
             f.write(f'Description=aetherscale {self.netname} VPN with tincd\n')
             f.write('\n')
             f.write('[Service]\n')
-            # Create an uninitialized tap device so that tincd can run
-            # without root permissions
-            # TODO: These commands are only needed once per boot of the host, so
-            # this should be handled by the aetherscale daemon once it comes
-            # up
-            f.write(
-                f'ExecStartPre=sudo ip link add {bridge_name_quoted} type bridge\n'
-                f'ExecStartPre=sudo ip tuntap add {interface_name_quoted} '
-                f'mode tap user {aetherscale.config.USER}\n'
-                f'ExecStartPre=sudo ip link set {bridge_name_quoted} up\n'
-                f'ExecStartPre=sudo ip link set {interface_name_quoted} up\n'
-                f'ExecStartPre=sudo ip link set {interface_name_quoted} '
-                f'master {bridge_name_quoted}\n')
             f.write(
                 f'ExecStart=tincd -D -c {net_dir_quoted} '
                 f'--pidfile {pidfile_quoted}\n')

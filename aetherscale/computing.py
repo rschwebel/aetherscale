@@ -13,7 +13,7 @@ import tempfile
 import time
 from typing import List, Optional, Dict, Any, Callable
 
-from . import interfaces
+from . import networking
 from .qemu import image, runtime
 from .qemu.exceptions import QemuException
 from . import config
@@ -128,7 +128,7 @@ class ComputingHandler:
             # TODO: Do we have to assign the VPN mac addr to the macvtap?
             vpn_tap_device = self._establish_vpn(options['vpn'], vm_id)
 
-            mac_addr_vpn = interfaces.create_mac_address()
+            mac_addr_vpn = networking.create_mac_address()
             logging.debug(
                 f'Assigning MAC address "{mac_addr_vpn}" to '
                 f'VM "{vm_id}" for VPN')
@@ -139,14 +139,15 @@ class ComputingHandler:
                 tap_device=vpn_tap_device)
             qemu_interfaces.append(privnet)
 
-        mac_addr = interfaces.create_mac_address()
-        logging.debug(f'Assigning MAC address "{mac_addr}" to VM "{vm_id}"')
+        if 'public-ip' in options and options['public-ip']:
+            mac_addr = networking.create_mac_address()
+            logging.debug(f'Assigning MAC address "{mac_addr}" to VM "{vm_id}"')
 
-        pubnet = runtime.QemuInterfaceConfig(
-            mac_address=mac_addr,
-            type=runtime.QemuInterfaceType.VDE,
-            vde_folder=Path(VDE_FOLDER))
-        qemu_interfaces.append(pubnet)
+            pubnet = runtime.QemuInterfaceConfig(
+                mac_address=mac_addr,
+                type=runtime.QemuInterfaceType.VDE,
+                vde_folder=Path(VDE_FOLDER))
+            qemu_interfaces.append(pubnet)
 
         qemu_config = runtime.QemuStartupConfig(
             vm_id=vm_id,
@@ -307,41 +308,53 @@ class ComputingHandler:
         os.remove(f.name)
 
     def _establish_vpn(self, vpn_name: str, vm_id: str) -> str:
+        vpn_network_prefix = self.radvd.generate_prefix()
+
         if vpn_name in self.established_vpns:
             vpn = self.established_vpns[vpn_name]
         else:
-            logging.info(f'Creating VPN {vpn_name}')
+            logging.info(f'Creating VPN {vpn_name} for VM {vm_id}')
 
             vpn = TincVirtualNetwork(
                 vpn_name, config.VPN_CONFIG_FOLDER, self.service_manager)
             vpn.create_config(config.HOSTNAME)
             vpn.gen_keypair()
+
+            # TODO: Must be re-established after host reboot
+            # Create an uninitialized tap device so that tincd can run
+            # without root permissions
+            # TODO: Assign an more reasonable IP address
+            # TODO: In real environments the host does not have to be exposed,
+            # this is only because I want to proxy IP traffic from the host to
+            # the guest
+            host_vpn_ip = vpn_network_prefix.replace('/64', '1')
+            networking.Iproute2Network.tap_device(
+                vpn.interface_name, aetherscale.config.USER)
+            networking.Iproute2Network.bridged_network(
+                vpn.bridge_interface_name, vpn.interface_name,
+                ip=host_vpn_ip, flush_ip_device=False)
+
             vpn.start_daemon()
 
             self.established_vpns[vpn_name] = vpn
 
+            # Setup radvd for IPv6 auto-configuration
+            self.radvd.add_interface(
+                vpn.bridge_interface_name, vpn_network_prefix)
+            self.service_manager.restart_service(RADVD_SERVICE_NAME)
+            logging.debug(
+                f'Added device {vpn.bridge_interface_name} to radvd '
+                f'with IPv6 address range {vpn_network_prefix}')
+
         # Create a new tap device for the VM to use
         # TODO: Must be re-established after a host reboot
-        # TODO: Create a dedicated module for net management
         associated_tap_device = 'vpn-' + vm_id
-        success = run_command_chain([[
-            'sudo', 'ip', 'tuntap', 'add', 'dev', associated_tap_device,
-            'mode', 'tap', 'user', config.USER
-        ], [
-            'sudo', 'ip', 'link', 'set', 'dev', associated_tap_device, 'up',
-        ], [
-            'sudo', 'ip', 'link', 'set', associated_tap_device,
-            'master', vpn.bridge_interface_name
-        ]])
+        success = networking.Iproute2Network.tap_device(
+            associated_tap_device, config.USER, vpn.bridge_interface_name)
         if not success:
-            raise VpnException('Could not setup macvtap for VPN "{vpn_name}"')
-
-        prefix = self.radvd.generate_prefix()
-        self.radvd.add_interface(vpn.bridge_interface_name, prefix)
-        self.service_manager.restart_service(RADVD_SERVICE_NAME)
+            raise VpnException(f'Could not setup tap for VPN "{vpn_name}"')
         logging.debug(
-            f'Added device {vpn.bridge_interface_name} to radvd '
-            f'with IPv6 address range {prefix}')
+            f'Created TAP device {associated_tap_device} for VM {vm_id}')
 
         return associated_tap_device
 
@@ -457,7 +470,7 @@ def run():
         queue=COMPETING_QUEUE, on_message_callback=bound_callback)
 
     # a TAP interface for VDE must already have been created
-    if not interfaces.check_device_existence(VDE_TAP_INTERFACE):
+    if not networking.Iproute2Network.check_device_existence(VDE_TAP_INTERFACE):
         logging.error(
             f'Interface {VDE_TAP_INTERFACE} does not exist. '
             'Please create it manually and then start this service again')

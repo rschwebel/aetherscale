@@ -70,6 +70,9 @@ def main():
         help='Script to execute at first boot of VM', required=False)
     create_vm_parser.add_argument(
         '--vpn', help='Name of the VPN to startup/join', required=False)
+    create_vm_parser.add_argument(
+        '--no-public-ip', dest='public_ip', action='store_false', default=True,
+        help='Do not assign a public interface to this VM')
     start_vm_parser = subparsers.add_parser('start-vm')
     start_vm_parser.add_argument(
         '--vm-id', dest='vm_id', help='ID of the VM to start', required=True)
@@ -98,6 +101,7 @@ def main():
             'command': 'create-vm',
             'options': {
                 'image': args.image,
+                'public-ip': args.public_ip,
             }
         }
 
@@ -131,7 +135,7 @@ def main():
     try:
         with ServerCommunication() as c:
             result = c.send_msg(data, response_expected)
-            print(result)
+            print(json.dumps(result))
     except pika.exceptions.AMQPConnectionError:
         print('Could not connect to AMQP broker. Is it running?',
               file=sys.stderr)
