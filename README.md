@@ -64,7 +64,11 @@ the following entry in `visudo`:
 youruser ALL=(ALL) NOPASSWD: /usr/bin/ip, /usr/bin/radvd
 ```
 
-This is not a perfect solution but Linux capabilities inheritance to
+Having `radvd` on the host machine is only a temporary solution. In a real
+setup, the VPN has to manage the internal IP addresses itself. We will
+probably provide an init-script template for a machine that does this.
+
+Requiring `sudo` is not a perfect solution but Linux capabilities inheritance to
 subprocesses seems quite complicated, and without inheritance we'd have to grant
 `CAP_NET_ADMIN` to both `ip` and `tincd`. This might be undesired, because
 then any user can change network devices. Another option could be to
