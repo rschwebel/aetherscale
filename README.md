@@ -12,13 +12,14 @@ which I am currently writing.
 
 ## Installation
 
-You can install the package with:
+I recommend that you install the package in a virtual environment for
+easy removal and to avoid conficts with system-wide stuff:
 
 ```bash
 git clone https://github.com/aufziehvogel/aetherscale
 cd aetherscale
 virtualenv venv && source venv/bin/activate
-pip install -e .
+pip install .
 ```
 
 ### Operating System Changes
@@ -29,33 +30,26 @@ For some actions more permissions than a standard user usually has are
 needed, though. This section will guide you through all of the changes
 required to allow aetherscale itself to run as a standard user.
 
-#### Bridge Networking
+#### Networking
 
-Before you can start using the server you need to setup a TAP device to which
-VDE networking can connect. This is needed so that the started VMs can
-join the network. To be able to create a TAP device that is connected to your
-real network, you might also have to setup a software bridge. aetherscale
-includes a script to help you with this. Since I could only test on my PC
-it might require some adjustment on other PCs. It takes all required info
-as parameters.
+aetherscale has to adjust your networking in order to expose the VMs to the
+network. I decided to setup a bridge network for the VMs to join with
+`iproute2`.
 
-```bash
-bin/setup-tap-vde.sh -u USER -i IP_ADDRESS -g GATEWAY -e PHYSICAL_DEVICE
+Bridge networks are used in two different situations:
 
-# For example
-bin/setup-tap-vde.sh -u username -i 192.168.0.10/24 -g 192.168.0.1 -e eth0
-```
+1. When exposing the VM to the public internet
+2. When establishing a VPN network between multiple VMs
 
-#### VPN Networking
+In both cases we use the `iproute2` (`ip`) utility. To allow aetherscale to
+run as a non-root user while still having access to networking changes, I
+decided to use `sudo` and allow rootless access to `ip`.
 
-It's possible to connect different VMs on possibly different hosts with a VPN.
-For each virtual network a tinc instance is started.
-
-In order to allow dynamic creation of network device entries we use `sudo`
-calls to the `ip` utility. To auto-configure IPv6 addresses of VPNs inside
+For VPN there currently is one more change needed (but this is only
+temporary). To auto-configure IPv6 addresses of VPNs inside
 the guest VM we use IPv6 Router Advertisement messages. We run a `radvd`
 server that sends out the prefixes for IPv6 addresses. `radvd` also requires
-root permissions (or to be exact `CAP_NET_RAW` permissions).
+root permissions (to be exact it requires `CAP_NET_RAW` permissions).
 
 To allow these calls you have to enable passwordless sudo permissions with
 the following entry in `visudo`:
@@ -81,13 +75,28 @@ program, it feels too heavy for a proof-of-concept tool.
 
 ## Usage
 
-The server can be started with:
+To start the server you have to define your host's IP address and gateway. This
+is needed, because aetherscale re-maps the IP configuration from your
+physical interface to the newly created bridge device.
+
+For example, if your PC has the IP address `192.168.2.123` in a `/24` subnet,
+the gateway is `192.168.2.1` and your ethernet device is `enp0s25`.
 
 ```bash
-aetherscale
+NETWORK_IP=192.168.2.123/24 NETWORK_GATEWAY=192.168.2.1 \
+    NETWORK_PHYSICAL_DEVICE=enp0s25 aetherscale
 ```
 
-For example, to list all running VMs run the following client command:
+Once the server is running, you can start a VM with:
+
+```bash
+aetherscale-cli create-vm --image some-base-image-name
+```
+
+The base image must exist as `$BASE_IMAGE_FOLDER/some-base-image-name.qcow2`.
+You can configure the environment variable `$BASE_IMAGE_FOLDER` to any folder.
+
+You can then list all running VMs with:
 
 ```bash
 aetherscale-cli list-vms

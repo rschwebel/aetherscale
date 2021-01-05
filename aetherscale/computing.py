@@ -11,15 +11,14 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import List, Optional, Dict, Any, Callable
+from typing import List, Optional, Dict, Any, Callable, Tuple
 
 from . import networking
 from .qemu import image, runtime
 from .qemu.exceptions import QemuException
 from . import config
 from . import services
-from .vpn.tinc import TincVirtualNetwork, VpnException
-from .execution import run_command_chain
+from .vpn.tinc import TincVirtualNetwork
 import aetherscale.vpn.radvd
 
 
@@ -64,6 +63,34 @@ def create_user_image(vm_id: str, image_name: str) -> Path:
         raise QemuException(f'Could not create image for VM "{vm_id}"')
 
     return user_image
+
+
+def setup_script_path(tap_name: str) -> Path:
+    network_conf_dir = config.AETHERSCALE_CONFIG_DIR / 'networking'
+    return network_conf_dir / f'{tap_name}-setup.sh'
+
+
+def teardown_script_path(tap_name: str) -> Path:
+    network_conf_dir = config.AETHERSCALE_CONFIG_DIR / 'networking'
+    return network_conf_dir / f'{tap_name}-teardown.sh'
+
+
+def setup_tap_device(tap_name: str, bridge: str) -> Tuple[Path, Path]:
+    iproute = networking.Iproute2Network()
+    iproute.tap_device(tap_name, config.USER, bridge)
+
+    setup_script = setup_script_path(tap_name)
+    teardown_script = teardown_script_path(tap_name)
+
+    with open(setup_script, 'w') as f:
+        f.write(iproute.setup_script())
+    os.chmod(setup_script, 0o755)
+
+    with open(teardown_script, 'w') as f:
+        f.write(iproute.teardown_script())
+    os.chmod(teardown_script, 0o755)
+
+    return setup_script, teardown_script
 
 
 class ComputingHandler:
@@ -124,9 +151,15 @@ class ComputingHandler:
 
         qemu_interfaces = []
 
+        network_setup_scripts = []
+        network_teardown_scripts = []
+
         if 'vpn' in options:
             # TODO: Do we have to assign the VPN mac addr to the macvtap?
             vpn_tap_device = self._establish_vpn(options['vpn'], vm_id)
+            network_setup_scripts.append(setup_script_path(vpn_tap_device))
+            network_teardown_scripts.append(
+                teardown_script_path(vpn_tap_device))
 
             mac_addr_vpn = networking.create_mac_address()
             logging.debug(
@@ -143,11 +176,17 @@ class ComputingHandler:
             mac_addr = networking.create_mac_address()
             logging.debug(f'Assigning MAC address "{mac_addr}" to VM "{vm_id}"')
 
+            pub_tap_device = f'pub-{vm_id}'
             pubnet = runtime.QemuInterfaceConfig(
                 mac_address=mac_addr,
-                type=runtime.QemuInterfaceType.VDE,
-                vde_folder=Path(VDE_FOLDER))
+                type=runtime.QemuInterfaceType.TAP,
+                tap_device=pub_tap_device)
             qemu_interfaces.append(pubnet)
+
+            setup_script, teardown_script = setup_tap_device(
+                pub_tap_device, 'br0')
+            network_setup_scripts.append(setup_script)
+            network_teardown_scripts.append(teardown_script)
 
         qemu_config = runtime.QemuStartupConfig(
             vm_id=vm_id,
@@ -155,7 +194,9 @@ class ComputingHandler:
             interfaces=qemu_interfaces)
 
         unit_name = systemd_unit_name_for_vm(vm_id)
-        self._create_qemu_systemd_unit(unit_name, qemu_config)
+        self._create_qemu_systemd_unit(
+            unit_name, qemu_config,
+            network_setup_scripts, network_teardown_scripts)
         self.service_manager.start_service(unit_name)
 
         logging.info(f'Started VM "{vm_id}"')
@@ -253,7 +294,8 @@ class ComputingHandler:
         }
 
     def _create_qemu_systemd_unit(
-            self, unit_name: str, qemu_config: runtime.QemuStartupConfig):
+            self, unit_name: str, qemu_config: runtime.QemuStartupConfig,
+            setup_scripts: List[Path], teardown_scripts: List[Path]):
         qemu_name = \
             f'qemu-vm-{qemu_config.vm_id},process=vm-{qemu_config.vm_id}'
         qemu_monitor_path = qemu_socket_monitor(qemu_config.vm_id)
@@ -299,7 +341,11 @@ class ComputingHandler:
             f.write(f'Description=aetherscale VM {qemu_config.vm_id}\n')
             f.write('\n')
             f.write('[Service]\n')
+            for script in setup_scripts:
+                f.write(f'ExecStartPre={script.absolute()}\n')
             f.write(f'ExecStart={command}\n')
+            for script in teardown_scripts:
+                f.write(f'ExecStopPost={script.absolute()}\n')
             f.write('\n')
             f.write('[Install]\n')
             f.write('WantedBy=default.target\n')
@@ -320,21 +366,22 @@ class ComputingHandler:
             vpn.create_config(config.HOSTNAME)
             vpn.gen_keypair()
 
-            # TODO: Must be re-established after host reboot
             # Create an uninitialized tap device so that tincd can run
             # without root permissions
-            # TODO: Assign an more reasonable IP address
+            # TODO: Assign a more reasonable IP address
             # TODO: In real environments the host does not have to be exposed,
             # this is only because I want to proxy IP traffic from the host to
             # the guest
             host_vpn_ip = vpn_network_prefix.replace('/64', '1')
-            networking.Iproute2Network.tap_device(
-                vpn.interface_name, aetherscale.config.USER)
-            networking.Iproute2Network.bridged_network(
+            iproute = networking.Iproute2Network()
+            iproute.tap_device(vpn.interface_name, aetherscale.config.USER)
+            iproute.bridged_network(
                 vpn.bridge_interface_name, vpn.interface_name,
                 ip=host_vpn_ip, flush_ip_device=False)
+            setup_network_script = iproute.setup_script()
+            teardown_network_script = iproute.teardown_script()
 
-            vpn.start_daemon()
+            vpn.start_daemon(setup_network_script, teardown_network_script)
 
             self.established_vpns[vpn_name] = vpn
 
@@ -347,12 +394,9 @@ class ComputingHandler:
                 f'with IPv6 address range {vpn_network_prefix}')
 
         # Create a new tap device for the VM to use
-        # TODO: Must be re-established after a host reboot
         associated_tap_device = 'vpn-' + vm_id
-        success = networking.Iproute2Network.tap_device(
-            associated_tap_device, config.USER, vpn.bridge_interface_name)
-        if not success:
-            raise VpnException(f'Could not setup tap for VPN "{vpn_name}"')
+        setup_tap_device(associated_tap_device, vpn.bridge_interface_name)
+
         logging.debug(
             f'Created TAP device {associated_tap_device} for VM {vm_id}')
 
@@ -470,11 +514,18 @@ def run():
         queue=COMPETING_QUEUE, on_message_callback=bound_callback)
 
     # a TAP interface for VDE must already have been created
+    vde_tap_iproute = networking.Iproute2Network()
+
     if not networking.Iproute2Network.check_device_existence(VDE_TAP_INTERFACE):
-        logging.error(
-            f'Interface {VDE_TAP_INTERFACE} does not exist. '
-            'Please create it manually and then start this service again')
-        sys.exit(1)
+        vde_tap_iproute.bridged_network(
+            'br0', config.NETWORK_PHYSICAL_DEVICE,
+            config.NETWORK_IP, config.NETWORK_GATEWAY,
+            flush_ip_device=True)
+        vde_tap_iproute.tap_device(VDE_TAP_INTERFACE, config.USER, 'br0')
+
+        if not vde_tap_iproute.setup():
+            print('Could not setup VDE tap device', file=sys.stderr)
+            sys.exit(1)
 
     logging.info('Bringing up VDE networking')
     service_manager.install_service(
@@ -491,3 +542,4 @@ def run():
         channel.start_consuming()
     except KeyboardInterrupt:
         print('Keyboard interrupt, stopping service')
+        vde_tap_iproute.teardown()

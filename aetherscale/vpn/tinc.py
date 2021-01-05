@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 from typing import Optional
 
+from aetherscale import config
 from aetherscale.services import ServiceManager
 
 
@@ -101,9 +102,21 @@ class TincVirtualNetwork(object):
     def _service_name(self) -> str:
         return f'aetherscale-tincd-{self.netname}.service'
 
-    def start_daemon(self):
+    def start_daemon(
+            self, setup_network_script: str, teardown_network_script: str):
         net_dir_quoted = shlex.quote(str(self._net_config_folder()))
         pidfile_quoted = shlex.quote(str(self.pidfile))
+
+        network_conf_dir = config.AETHERSCALE_CONFIG_DIR / 'networking'
+        network_conf_dir.mkdir(parents=True, exist_ok=True)
+        setup_file = network_conf_dir / f'network-{self.netname}-setup.sh'
+        teardown_file = network_conf_dir / f'network-{self.netname}-teardown.sh'
+        with open(setup_file, 'w') as f:
+            f.write(setup_network_script)
+            os.chmod(setup_file, 0o755)
+        with open(teardown_file, 'w') as f:
+            f.write(teardown_network_script)
+            os.chmod(teardown_file, 0o755)
 
         service_name = self._service_name()
         with tempfile.NamedTemporaryFile('wt') as f:
@@ -111,9 +124,11 @@ class TincVirtualNetwork(object):
             f.write(f'Description=aetherscale {self.netname} VPN with tincd\n')
             f.write('\n')
             f.write('[Service]\n')
+            f.write(f'ExecStartPre={setup_file.absolute()}\n')
             f.write(
                 f'ExecStart=tincd -D -c {net_dir_quoted} '
                 f'--pidfile {pidfile_quoted}\n')
+            f.write(f'ExecStopPost={teardown_file.absolute()}\n')
             f.write('\n')
             f.write('[Install]\n')
             f.write('WantedBy=default.target\n')

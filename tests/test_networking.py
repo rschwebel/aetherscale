@@ -1,3 +1,4 @@
+from unittest import mock
 import pytest
 
 from aetherscale import networking
@@ -35,3 +36,31 @@ def test_ip_address_validation():
 
     with pytest.raises(networking.NetworkingException):
         networking.Iproute2Network.validate_ip_address('something-invalid')
+
+
+def test_iproute2_networking_scripts():
+    iproute = networking.Iproute2Network()
+    iproute.bridged_network('br0', 'eth0', '10.0.0.2/24', '10.0.0.1')
+    iproute.tap_device('tap0', 'myuser', 'br0')
+    setup_script = iproute.setup_script()
+    teardown_script = iproute.teardown_script()
+
+    assert 'link add br0 type bridge' in setup_script
+    assert 'set eth0 master br0' in setup_script
+    assert 'addr add 10.0.0.2/24 dev br0' in setup_script
+    assert 'tuntap add dev tap0' in setup_script
+
+    assert 'link del br0' in teardown_script
+    assert 'link del tap0' in teardown_script
+    assert 'addr add 10.0.0.2/24 dev eth0' in teardown_script
+
+
+@mock.patch('aetherscale.execution.run_command_chain')
+def test_iproute2_networking_direct_execution(command_chain):
+    iproute = networking.Iproute2Network()
+    iproute.bridged_network('br0', 'eth0')
+
+    iproute.setup()
+
+    bridge_command = ['sudo', 'ip', 'link', 'add', 'br0', 'type', 'bridge']
+    assert bridge_command in command_chain.call_args[0][0]

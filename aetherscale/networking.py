@@ -1,6 +1,7 @@
 import logging
 import random
 import re
+import shlex
 import subprocess
 from typing import Optional
 
@@ -23,11 +24,14 @@ class NetworkingException(Exception):
 
 
 class Iproute2Network:
-    @staticmethod
+    def __init__(self):
+        self.creation_commands = []
+        self.deletion_commands = []
+
     def bridged_network(
-            bridge_device: str, phys_device: str,
+            self, bridge_device: str, phys_device: str,
             ip: Optional[str] = None, gateway: Optional[str] = None,
-            flush_ip_device: bool = True) -> bool:
+            flush_ip_device: bool = True):
         Iproute2Network.validate_device_name(bridge_device)
         Iproute2Network.validate_device_name(phys_device)
         if ip:
@@ -35,9 +39,9 @@ class Iproute2Network:
         if gateway:
             Iproute2Network.validate_ip_address(gateway)
 
-        Iproute2Network._create_bridge(bridge_device)
+        self._create_bridge(bridge_device)
 
-        commands = [
+        self.creation_commands += [
             ['sudo', 'ip', 'link', 'set', phys_device, 'up'],
             ['sudo', 'ip', 'link', 'set', phys_device, 'master', bridge_device],
             ['sudo', 'ip', 'addr', 'flush', 'dev', phys_device],
@@ -45,20 +49,31 @@ class Iproute2Network:
 
         if ip:
             if flush_ip_device:
-                commands.append(
+                self.creation_commands.append(
                     ['sudo', 'ip', 'addr', 'flush', 'dev', bridge_device])
-            commands.append(
+
+            self.creation_commands.append(
                 ['sudo', 'ip', 'addr', 'add', ip, 'dev', bridge_device])
+
         if gateway:
-            commands.append(
+            self.creation_commands.append(
                 ['sudo', 'ip', 'route', 'add', 'default',
                  'via', gateway, 'dev', bridge_device])
+            self.deletion_commands.append(
+                ['sudo', 'ip', 'route', 'add', 'default',
+                 'via', gateway, 'dev', phys_device])
+            self.deletion_commands.append(
+                ['sudo', 'ip', 'route', 'del', 'default'])
 
-        return execution.run_command_chain(commands)
+        if ip:
+            self.deletion_commands.append(
+                ['sudo', 'ip', 'addr', 'add', ip, 'dev', phys_device])
 
-    @staticmethod
+        self.deletion_commands.append([
+            'sudo', 'ip', 'link', 'set', phys_device, 'nomaster'])
+
     def tap_device(
-            tap_device_name: str, user: str,
+            self, tap_device_name: str, user: str,
             bridge_device: Optional[str] = None):
         Iproute2Network.validate_device_name(tap_device_name)
         if bridge_device:
@@ -67,40 +82,61 @@ class Iproute2Network:
         if Iproute2Network.check_device_existence(tap_device_name):
             logging.debug(
                 f'Device {tap_device_name} already exists, will not re-create')
-            return True
         else:
             logging.debug(f'Creating TAP device {tap_device_name}')
 
-            commands = [
+            self.creation_commands += [
                 ['sudo', 'ip', 'tuntap', 'add', 'dev', tap_device_name,
                  'mode', 'tap', 'user', user],
                 ['sudo', 'ip', 'link', 'set', 'dev', tap_device_name, 'up'],
             ]
+            self.deletion_commands.append(
+                ['sudo', 'ip', 'link', 'del', tap_device_name])
 
             if bridge_device:
-                commands.append([
+                self.creation_commands.append([
                     'sudo', 'ip', 'link', 'set', tap_device_name,
                     'master', bridge_device,
                 ])
+                self.deletion_commands.append([
+                    'sudo', 'ip', 'link', 'set', tap_device_name, 'nomaster'])
 
-            creation_ok = execution.run_command_chain(commands)
-            return creation_ok
+    def setup_script(self):
+        return Iproute2Network._to_script(self.creation_commands)
+
+    def teardown_script(self):
+        return Iproute2Network._to_script(reversed(self.deletion_commands))
+
+    def setup(self):
+        return execution.run_command_chain(self.creation_commands)
+
+    def teardown(self):
+        return execution.run_command_chain(reversed(self.deletion_commands))
 
     @staticmethod
-    def _create_bridge(bridge_device: str):
+    def _to_script(commands):
+        script_lines = ['#!/usr/bin/env bash']
+
+        for command in commands:
+            script_lines.append(shlex.join(command))
+
+        return '\n'.join(script_lines)
+
+    def _create_bridge(self, bridge_device: str):
         Iproute2Network.validate_device_name(bridge_device)
 
         if Iproute2Network.check_device_existence(bridge_device):
             logging.debug(
                 f'Device {bridge_device} already exists, will not re-create')
-            return True
         else:
             logging.debug(f'Creating bridge device {bridge_device}')
 
-            return execution.run_command_chain([
+            self.creation_commands += [
                 ['sudo', 'ip', 'link', 'add', bridge_device, 'type', 'bridge'],
                 ['sudo', 'ip', 'link', 'set', bridge_device, 'up'],
-            ])
+            ]
+            self.deletion_commands.append(
+                ['sudo', 'ip', 'link', 'del', bridge_device])
 
     @staticmethod
     def check_device_existence(device: str) -> bool:

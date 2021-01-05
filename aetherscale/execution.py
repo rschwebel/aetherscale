@@ -1,9 +1,9 @@
 import logging
 import subprocess
-from typing import List
+from typing import List, Iterator
 
 
-def run_command_chain(commands: List[List[str]]) -> bool:
+def run_command_chain(commands: Iterator[List[str]]) -> bool:
     for command in commands:
         logging.debug(f'Running command: {" ".join(command)}')
         result = subprocess.run(command)
