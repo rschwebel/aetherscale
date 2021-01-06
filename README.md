@@ -73,7 +73,23 @@ binary that is to be executed.
 While this in my opinion would be a reasonable choice for a production
 program, it feels too heavy for a proof-of-concept tool.
 
-## Usage
+## Getting Started
+
+Each VM is booted from a base image, which has to be created in advance.
+This means that at first you have to create a base image. Download an
+installation ISO for your favourite Linux distribution and install it to a
+qcow2 file with the following command, following the installation instruction
+inside the started QEMU VM.
+
+```bash
+BASE_IMAGE=base-image-name.qcow2
+ISO=your-distribution.iso
+qemu-img create -f qcow2 $BASE_IMAGE 20G
+qemu-system-x86_64 -cpu host -accel kvm -m 4096 -hda $BASE_IMAGE -cdrom $ISO
+```
+
+The qcow2 is your base image. It must be located inside the
+`$BASE_IMAGE_FOLDER` directory. This is a configurable environment variable.
 
 To start the server you have to define your host's IP address and gateway. This
 is needed, because aetherscale re-maps the IP configuration from your
@@ -90,7 +106,7 @@ NETWORK_IP=192.168.2.123/24 NETWORK_GATEWAY=192.168.2.1 \
 Once the server is running, you can start a VM with:
 
 ```bash
-aetherscale-cli create-vm --image some-base-image-name
+aetherscale-cli create-vm --image base-image-name
 ```
 
 The base image must exist as `$BASE_IMAGE_FOLDER/some-base-image-name.qcow2`.
