@@ -102,6 +102,7 @@ class ComputingHandler:
         self.service_manager = service_manager
 
         self.established_vpns: Dict[str, TincVirtualNetwork] = {}
+        self.available_vpn_ports = config.VPN_PORTS
 
     def list_vms(self, _: Dict[str, Any]) -> Iterator[List[Dict[str, Any]]]:
         vms = []
@@ -362,12 +363,15 @@ class ComputingHandler:
         vpn_network_prefix = self.radvd.generate_prefix()
 
         if vpn_name in self.established_vpns:
+            # TODO: Established VPNs should be restored after daemon re-start
             vpn = self.established_vpns[vpn_name]
         else:
             logging.info(f'Creating VPN {vpn_name} for VM {vm_id}')
 
+            vpn_port = self.available_vpn_ports.pop()
             vpn = TincVirtualNetwork(
-                vpn_name, config.VPN_CONFIG_FOLDER, self.service_manager)
+                vpn_name, config.VPN_CONFIG_FOLDER, vpn_port,
+                self.service_manager)
             vpn.create_config(config.HOSTNAME)
             vpn.gen_keypair()
 

@@ -18,7 +18,7 @@ class VpnException(Exception):
 
 class TincVirtualNetwork(object):
     def __init__(
-            self, netname: str, config_folder: Path,
+            self, netname: str, config_folder: Path, port: int,
             service_manager: ServiceManager):
         if not self._validate_netname(netname):
             raise ValueError(
@@ -27,8 +27,7 @@ class TincVirtualNetwork(object):
         self.netname = netname
         self.config_base_folder = config_folder
         self.service_manager = service_manager
-        # TODO: To support multi VPN each VPN has to use another port
-        self.port = 20000
+        self.port = port
 
         self.pidfile = Path(tempfile.gettempdir()) / f'tincd-{self.netname}.run'
 
