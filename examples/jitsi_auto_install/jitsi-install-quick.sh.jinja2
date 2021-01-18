@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+# This script must be used in combination with a prepared base image on which
+# all of the dependencies (but not Jitsi) have already been installed. To
+# further speed-up installation, the base image should already have the
+# jitsi packages downloaded (--download-only option of apt)
+
+hostnamectl set-hostname {{ hostname }}
+
+echo "jitsi-videobridge jitsi-videobridge/jvb-hostname string {{ hostname }}" | debconf-set-selections
+echo "jitsi-meet jitsi-meet/cert-choice select Self-signed certificate will be generated" | debconf-set-selections
+export DEBIAN_FRONTEND=noninteractive
+apt -y install jitsi-meet
