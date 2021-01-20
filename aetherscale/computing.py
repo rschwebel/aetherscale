@@ -541,6 +541,7 @@ def run():
     # a TAP interface for VDE must already have been created
     vde_tap_iproute = networking.Iproute2Network()
 
+    # TODO: VDE is not used anymore, we only need the br0 interface
     if not networking.Iproute2Network.check_device_existence(VDE_TAP_INTERFACE):
         vde_tap_iproute.bridged_network(
             'br0', config.NETWORK_PHYSICAL_DEVICE,
