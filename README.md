@@ -165,6 +165,43 @@ of a message can open a channel with this name on the broker and will receive
 responses. This is useful if you have to wait until another component has
 performed their work.
 
+### Files created by aetherscale
+
+aetherscale creates different files for VM management in your filesystem.
+My goal is to make aetherscale so simple that you can always fix or extend
+stuff manually. This section lists all relevant files that aetherscale creates.
+The aetherscale configuration directory is a config variable and thus might
+be changed. In this section it is refered to as `$CONFIG_DIR`, its default
+location is `~/.config/aetherscale`.
+
+For each VM aetherscale creates:
+
+- if required by the VM, networking setup scripts for the VM at
+  `$CONFIG_DIR/networking/*-setup.sh` as well as teardown scripts at
+  `$CONFIG_DIR/networking/*-teardown.sh`
+- a systemd user service file at
+  `~/.config/systemd/user/aetherscale-vm-*.service`
+
+TODOs for VM networking:
+
+- TODO: Structure files into subfolders, e.g. `CONFIG/vm/vm-ID/IFACE-setup.sh`?
+
+For each VPN network aetherscale creates:
+
+- a tincd configuration folder structure at
+  `$CONFIG_DIR/tinc` with one subfolder per VPN network
+- setup and teardown scripts for the host networking rules at
+  `$CONFIG_DIR/networking/network-*-setup.sh` and
+  `$CONFIG_DIR/networking/network-*-teardown.sh`
+- a systemd user service file at
+  `~/.config/systemd/aetherscale-tincd-*.service`
+
+TODOs for VPN networking:
+
+- TODO: Rename prefix to `vpn` instead of `network`
+- TODO: Structure files into subfolders, e.g. `CONFIG/vpn/vpn-abc/setup.sh`?
+
+
 ### Messages
 
 Create a new machine:
