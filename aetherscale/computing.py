@@ -10,7 +10,6 @@ import string
 import subprocess
 import sys
 import tempfile
-import time
 from typing import List, Optional, Dict, Any, Callable, Tuple, Iterator
 
 from . import networking
@@ -21,9 +20,6 @@ from . import services
 from .vpn.tinc import TincVirtualNetwork
 import aetherscale.vpn.radvd
 
-
-VDE_FOLDER = '/tmp/vde.ctl'
-VDE_TAP_INTERFACE = 'tap-vde'
 
 EXCHANGE_NAME = 'computing'
 COMPETING_QUEUE = 'computing-competing'
@@ -538,34 +534,11 @@ def run():
     channel.basic_consume(
         queue=COMPETING_QUEUE, on_message_callback=bound_callback)
 
-    # a TAP interface for VDE must already have been created
-    vde_tap_iproute = networking.Iproute2Network()
-
-    # TODO: VDE is not used anymore, we only need the br0 interface
-    if not networking.Iproute2Network.check_device_existence(VDE_TAP_INTERFACE):
-        vde_tap_iproute.bridged_network(
-            'br0', config.NETWORK_PHYSICAL_DEVICE,
-            config.NETWORK_IP, config.NETWORK_GATEWAY,
-            flush_ip_device=True)
-        vde_tap_iproute.tap_device(VDE_TAP_INTERFACE, config.USER, 'br0')
-
-        if not vde_tap_iproute.setup():
-            print('Could not setup VDE tap device', file=sys.stderr)
-            sys.exit(1)
-
-    logging.info('Bringing up VDE networking')
-    service_manager.install_service(
-        Path('data/systemd/aetherscale-vde.service'),
-        'aetherscale-vde.service')
-    service_manager.start_service('aetherscale-vde.service')
-    # Give systemd a bit time to start VDE
-    time.sleep(0.5)
-    if not service_manager.service_is_running('aetherscale-vde.service'):
-        logging.error('Failed to start VDE networking.')
+    if not networking.Iproute2Network.check_device_existence('br0'):
+        print('aetherscale expects a device br0 to exist', file=sys.stderr)
         sys.exit(1)
 
     try:
         channel.start_consuming()
     except KeyboardInterrupt:
         print('Keyboard interrupt, stopping service')
-        vde_tap_iproute.teardown()

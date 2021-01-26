@@ -91,17 +91,9 @@ qemu-system-x86_64 -cpu host -accel kvm -m 4096 -hda $BASE_IMAGE -cdrom $ISO
 The qcow2 is your base image. It must be located inside the
 `$BASE_IMAGE_FOLDER` directory. This is a configurable environment variable.
 
-To start the server you have to define your host's IP address and gateway. This
-is needed, because aetherscale re-maps the IP configuration from your
-physical interface to the newly created bridge device.
-
-For example, if your PC has the IP address `192.168.2.123` in a `/24` subnet,
-the gateway is `192.168.2.1` and your ethernet device is `enp0s25`.
-
-```bash
-NETWORK_IP=192.168.2.123/24 NETWORK_GATEWAY=192.168.2.1 \
-    NETWORK_PHYSICAL_DEVICE=enp0s25 aetherscale
-```
+aetherscale expects a bridge network on the physical ethernet which can be
+used to attach additional TAP interfaces for VMs. If this interface does not
+exist, an error will be displayed on startup of the server.
 
 Once the server is running, you can start a VM with:
 
