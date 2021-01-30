@@ -282,7 +282,7 @@ class ComputingHandler:
 
         # force kill stop when a VM is deleted
         options['kill'] = True
-        self.stop_vm(options)
+        self._exhaust(self.stop_vm(options))
 
         unit_name = systemd_unit_name_for_vm(vm_id)
         user_image = user_image_path(vm_id)
@@ -406,6 +406,9 @@ class ComputingHandler:
             f'Created TAP device {associated_tap_device} for VM {vm_id}')
 
         return associated_tap_device
+
+    def _exhaust(self, generator):
+        all(generator)
 
 
 def get_process_for_vm(vm_id: str) -> Optional[psutil.Process]:
