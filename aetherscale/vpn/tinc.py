@@ -96,7 +96,7 @@ class TincVirtualNetwork(object):
         return True
 
     def _net_config_folder(self) -> Path:
-        return self.config_base_folder / self.netname
+        return config.AETHERSCALE_CONFIG_DIR / 'vpn' / self.netname / 'tinc'
 
     def _service_name(self) -> str:
         return f'aetherscale-tincd-{self.netname}.service'
