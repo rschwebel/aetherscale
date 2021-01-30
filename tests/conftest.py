@@ -1,6 +1,6 @@
 from pathlib import Path
 import pytest
-from typing import Optional
+from typing import Optional, List
 
 from aetherscale.services import ServiceManager
 import aetherscale.timing
@@ -77,5 +77,8 @@ def mock_service_manager():
 
         def service_exists(self, service_name: str) -> bool:
             return service_name in self.services
+
+        def list_services(self) -> List[str]:
+            return self.services
 
     return MockServiceManager()

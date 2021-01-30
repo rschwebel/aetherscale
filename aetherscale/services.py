@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Optional
+from typing import Optional, List
 
 from aetherscale.execution import run_command_chain
 
@@ -51,6 +51,10 @@ class ServiceManager(ABC):
     @abstractmethod
     def service_exists(self, service_name: str) -> bool:
         """Check whether a service is currently installed"""
+
+    @abstractmethod
+    def list_services(self) -> List[str]:
+        """List all available services"""
 
 
 class SystemdServiceManager(ServiceManager):
@@ -141,6 +145,15 @@ class SystemdServiceManager(ServiceManager):
 
     def service_exists(self, service_name: str) -> bool:
         return self._systemd_unit_path(service_name).is_file()
+
+    def list_services(self) -> List[str]:
+        services = []
+
+        for filepath in self.unit_folder.iterdir():
+            if filepath.suffix == '.service':
+                services.append(filepath.name)
+
+        return services
 
     def _systemd_unit_path(self, service_name: str) -> Path:
         return self.unit_folder / service_name

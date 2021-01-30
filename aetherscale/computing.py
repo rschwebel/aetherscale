@@ -5,6 +5,7 @@ from pathlib import Path
 import pika
 import psutil
 import random
+import re
 import shlex
 import string
 import subprocess
@@ -101,12 +102,33 @@ class ComputingHandler:
         self.available_vpn_ports = config.VPN_PORTS
 
     def list_vms(self, _: Dict[str, Any]) -> Iterator[List[Dict[str, Any]]]:
-        vms = []
+        all_vms = []
+        for service in self.service_manager.list_services():
+            try:
+                all_vms.append(vm_id_from_systemd_unit(service))
+            except ValueError:
+                # Not a VM systemd unit
+                pass
 
+        running_vms = []
         for proc in psutil.process_iter(['pid', 'name']):
             if proc.name().startswith('vm-'):
                 vm_id = proc.name()[3:]
+                running_vms.append(vm_id)
 
+        orphaned_vms = set(running_vms).difference(all_vms)
+        for orphaned_vm in orphaned_vms:
+            logging.warning(f'VM "{orphaned_vm} is orphaned')
+
+        vms = []
+        for vm_id in all_vms:
+            if vm_id not in running_vms:
+                vms.append({
+                    'vm-id': vm_id,
+                })
+            else:
+                # Fetch IP info for running VMs
+                # TODO: IP info should be moved to a details request
                 socket_file = qemu_socket_guest_agent(vm_id)
                 hint = None
                 ip_addresses = []
@@ -421,6 +443,15 @@ def get_process_for_vm(vm_id: str) -> Optional[psutil.Process]:
 
 def systemd_unit_name_for_vm(vm_id: str) -> str:
     return f'aetherscale-vm-{vm_id}.service'
+
+
+def vm_id_from_systemd_unit(systemd_unit: str) -> str:
+    m = re.match(r'aetherscale-vm-([a-z0-9]+)(?:\.service)?', systemd_unit)
+    if m:
+        return m.group(1)
+    else:
+        raise ValueError(
+            f'{systemd_unit} is not a valid systemd unit file for a VM')
 
 
 def noop_responder(_: Dict[str, Any]):
