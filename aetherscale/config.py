@@ -15,7 +15,7 @@ BASE_IMAGE_FOLDER = Path(os.getenv('BASE_IMAGE_FOLDER', default='base_images'))
 USER_IMAGE_FOLDER = Path(os.getenv('USER_IMAGE_FOLDER', default='user_images'))
 
 AETHERSCALE_CONFIG_DIR = Path.home() / '.config/aetherscale'
-(AETHERSCALE_CONFIG_DIR / 'networking').mkdir(parents=True, exist_ok=True)
+AETHERSCALE_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 VPN_CONFIG_FOLDER = AETHERSCALE_CONFIG_DIR / 'tinc'
 VPN_NUM_PREPARED_INTERFACES = 2

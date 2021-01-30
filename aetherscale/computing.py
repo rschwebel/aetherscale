@@ -99,6 +99,9 @@ def setup_tap_device(
     setup_script = setup_script_path(resource_folder, tap_name)
     teardown_script = teardown_script_path(resource_folder, tap_name)
 
+    setup_script.parent.mkdir(parents=True, exist_ok=True)
+    teardown_script.parent.mkdir(parents=True, exist_ok=True)
+
     with open(setup_script, 'w') as f:
         f.write(iproute.setup_script())
     os.chmod(setup_script, 0o755)
