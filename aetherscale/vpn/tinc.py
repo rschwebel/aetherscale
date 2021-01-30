@@ -106,7 +106,9 @@ class TincVirtualNetwork(object):
         net_dir_quoted = shlex.quote(str(self._net_config_folder()))
         pidfile_quoted = shlex.quote(str(self.pidfile))
 
-        network_conf_dir = config.AETHERSCALE_CONFIG_DIR / 'networking'
+        # TODO: Manage all paths through a central module responsible for
+        # path/files management
+        network_conf_dir = config.AETHERSCALE_CONFIG_DIR / 'vpn' / self.netname
         network_conf_dir.mkdir(parents=True, exist_ok=True)
         setup_file = network_conf_dir / f'network-{self.netname}-setup.sh'
         teardown_file = network_conf_dir / f'network-{self.netname}-teardown.sh'
