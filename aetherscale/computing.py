@@ -316,7 +316,10 @@ class ComputingHandler:
 
         # once we delete the VM, we don't need its setup scripts anymore
         resource_folder = resource_config_path(ResourceType.VM, vm_id)
-        shutil.rmtree(resource_folder)
+        try:
+            shutil.rmtree(resource_folder)
+        except FileNotFoundError:
+            pass
 
         yield {
             'status': 'deleted',
