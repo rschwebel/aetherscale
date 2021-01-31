@@ -1,7 +1,7 @@
 # aetherscale
 
 aetherscale is small hobby project to create a hosting environment that can
-be controlled via an HTTP API. I just want to have some fun and
+be controlled via a programmable API. I just want to have some fun and
 dive deeper into Linux tooling (networking, virtualization and so on) and
 into distributed applications. I do not think that this will become
 production-ready at any point.
@@ -12,8 +12,8 @@ which I am currently writing.
 
 ## Installation
 
-I recommend that you install the package in a virtual environment for
-easy removal and to avoid conficts with system-wide stuff:
+I recommend installation of the package in a virtual environment for
+easy removal and to avoid conflicts with system-wide packages:
 
 ```bash
 git clone https://github.com/aufziehvogel/aetherscale
@@ -22,82 +22,55 @@ virtualenv venv && source venv/bin/activate
 pip install .
 ```
 
-### Operating System Changes
+aetherscale must be able to adjust networking interfaces and routing. For
+more information on why it uses the following permission management, refer
+to the section *Rationale* below.
 
-I am trying to design aetherscale to run without root permissions for
-as much as possible.
-For some actions more permissions than a standard user usually has are
-needed, though. This section will guide you through all of the changes
-required to allow aetherscale itself to run as a standard user.
-
-#### Networking
-
-aetherscale has to adjust your networking in order to expose the VMs to the
-network. I decided to setup a bridge network for the VMs to join with
-`iproute2`.
-
-Bridge networks are used in two different situations:
-
-1. When exposing the VM to the public internet
-2. When establishing a VPN network between multiple VMs
-
-In both cases we use the `iproute2` (`ip`) utility. To allow aetherscale to
-run as a non-root user while still having access to networking changes, I
-decided to use `sudo` and allow rootless access to `ip`.
-
-For VPN there currently is one more change needed (but this is only
-temporary). To auto-configure IPv6 addresses of VPNs inside
-the guest VM we use IPv6 Router Advertisement messages. We run a `radvd`
-server that sends out the prefixes for IPv6 addresses. `radvd` also requires
-root permissions (to be exact it requires `CAP_NET_RAW` permissions).
-
-To allow these calls you have to enable passwordless sudo permissions with
-the following entry in `visudo`:
+To allow aetherscale to adjust networking and routing, give the user that
+is running aetherscale sudo permissions for the `ip` program, i.e. add the
+following line to your `visudo`:
 
 ```
 youruser ALL=(ALL) NOPASSWD: /usr/bin/ip, /usr/bin/radvd
 ```
 
-Having `radvd` on the host machine is only a temporary solution. In a real
-setup, the VPN has to manage the internal IP addresses itself. We will
-probably provide an init-script template for a machine that does this.
+Currently, aetherscale also requires radvd for IPv6 in VPNs, but this will
+change in the future. We will expect users to handle their VPN completely
+on their own, i.e. there must be a DHCP or Router Advertisment server inside
+the VPN.
 
-Requiring `sudo` is not a perfect solution but Linux capabilities inheritance to
-subprocesses seems quite complicated, and without inheritance we'd have to grant
-`CAP_NET_ADMIN` to both `ip` and `tincd`. This might be undesired, because
-then any user can change network devices. Another option could be to
-assign `CAP_NET_ADMIN` to the user running aetherscale, but this seems to
-[require changes to pam](https://unix.stackexchange.com/questions/454708/how-do-you-add-cap-sys-admin-permissions-to-user-in-centos-7)
-and still seems to require inheritable capabilities to be set on each
-binary that is to be executed.
-While this in my opinion would be a reasonable choice for a production
-program, it feels too heavy for a proof-of-concept tool.
 
 ## Getting Started
 
 Each VM is booted from a base image, which has to be created in advance.
-This means that at first you have to create a base image. Download an
+To create a base image download an
 installation ISO for your favourite Linux distribution and install it to a
-qcow2 file with the following commands, following the installation instruction
-inside the started QEMU VM.
+qcow2 file with the following commands (and follow the installation
+instructions inside the started QEMU VM). When you're finished just shutdown
+the VM.
 
 ```bash
 BASE_IMAGE=base-image-name.qcow2
 ISO=your-distribution.iso
+
 qemu-img create -f qcow2 $BASE_IMAGE 20G
 qemu-system-x86_64 -cpu host -accel kvm -m 4096 -hda $BASE_IMAGE -cdrom $ISO
 ```
 
-The qcow2 is your base image. It must be located inside the
+The qcow2 base image must be located inside the
 `$BASE_IMAGE_FOLDER` directory. This is a configurable environment variable.
 
 aetherscale expects a bridge network `br0` on the physical ethernet which can
 be used to attach additional TAP interfaces for VMs. If this interface does not
-exist, an error will be displayed on startup of the server.
+exist, an error will be displayed on startup of the server. Please refer to
+your network manager's documentation (e.g. ifupdown, systemd-networkd, ...)
+for instructions on how to create a bridge. For iproute2 I have [a short
+tutorial on my blog](https://blog.stefan-koch.name/2020/10/25/qemu-public-ip-vm-with-tap).
 
-aetherscale comes with an included HTTP server. While our HTTP implementation
-does not allow scaling to multiple machines it simplifies the first steps. You
-can start the HTTP server with:
+To get started it's best to use the HTTP interface of the aetherscale
+server. While our HTTP implementation
+does not allow scaling to multiple machines it's a good way to play around
+with this program. You can start the HTTP server with:
 
 ```bash
 aetherscale http
@@ -110,10 +83,11 @@ VMs with:
 ```bash
 curl -XPOST -H "Content-Type: application/json" \
     -d '{"image": "ubuntu-20.04.1-server-amd64"}' http://localhost:5000/vm
+
 curl http://localhost:5000/vm
 ```
 
-The base image must exist as
+The base image must be located at
 `$BASE_IMAGE_FOLDER/ubuntu-20.04.1-server-amd64.qcow2`.
 
 You can also stop a running VM and start a stopped VM by `PATCH`'ing the
@@ -129,6 +103,13 @@ curl -XPATCH -H "Content-Type: application/json" \
 
 Please note that stopping a VM (gracefully) takes some time, so you cannot
 start it immediately after you have issued a stop request.
+
+TODO: We might change this interface to
+[an `actions` endpoint](https://restful-api-design.readthedocs.io/en/latest/methods.html)
+and treat action requests as an ordered queue of requests.
+I.e., a stop request immediately followed by a start request should bring
+the VM down (which might take a few seconds) and afterwards start it again
+(even if the start request cam in before the VM was completely stopped).
 
 
 ## Run Tests
@@ -225,6 +206,60 @@ Stuff I use for computing (and thus have learnt something about so far):
 - layer-2 VPN with tinc
 - `libguestfs` for analyzing and changing images
 - IPv6, radvd
+
+
+## Rationale
+
+### Operating System Changes
+
+I am trying to design aetherscale to run without root permissions for
+as much as possible.
+For some actions more permissions than a standard user usually has are
+needed, though. This section will guide you through all of the changes
+required to allow aetherscale itself to run as a standard user.
+
+#### Networking
+
+aetherscale has to adjust your networking in order to expose the VMs to the
+network. I decided to setup a bridge network for the VMs to join with
+`iproute2`.
+
+Bridge networks are used in two different situations:
+
+1. When exposing the VM to the public internet
+2. When establishing a VPN network between multiple VMs
+
+In both cases we use the `iproute2` (`ip`) utility. To allow aetherscale to
+run as a non-root user while still having access to networking changes, I
+decided to use `sudo` and allow rootless access to `ip`.
+
+For VPN there currently is one more change needed (but this is only
+temporary). To auto-configure IPv6 addresses of VPNs inside
+the guest VM we use IPv6 Router Advertisement messages. We run a `radvd`
+server that sends out the prefixes for IPv6 addresses. `radvd` also requires
+root permissions (to be exact it requires `CAP_NET_RAW` permissions).
+
+To allow these calls you have to enable passwordless sudo permissions with
+the following entry in `visudo`:
+
+```
+youruser ALL=(ALL) NOPASSWD: /usr/bin/ip, /usr/bin/radvd
+```
+
+Having `radvd` on the host machine is only a temporary solution. In a real
+setup, the VPN has to manage the internal IP addresses itself. We will
+probably provide an init-script template for a machine that does this.
+
+Requiring `sudo` is not a perfect solution but Linux capabilities inheritance to
+subprocesses seems quite complicated, and without inheritance we'd have to grant
+`CAP_NET_ADMIN` to both `ip` and `tincd`. This might be undesired, because
+then any user can change network devices. Another option could be to
+assign `CAP_NET_ADMIN` to the user running aetherscale, but this seems to
+[require changes to pam](https://unix.stackexchange.com/questions/454708/how-do-you-add-cap-sys-admin-permissions-to-user-in-centos-7)
+and still seems to require inheritable capabilities to be set on each
+binary that is to be executed.
+While this in my opinion would be a reasonable choice for a production
+program, it feels too heavy for a proof-of-concept tool.
 
 
 ## Contribution
