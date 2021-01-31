@@ -1,0 +1,13 @@
+[Unit]
+Description=Initialize machine-id for new VM
+ConditionPathExists=!/etc/machine-id
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/dbus-uuidgen --ensure
+ExecStart=/usr/bin/cp /var/lib/dbus/machine-id /etc/machine-id
+
+[Install]
+WantedBy=multi-user.target
