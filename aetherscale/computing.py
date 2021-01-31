@@ -249,6 +249,7 @@ class ComputingHandler:
             unit_name, qemu_config,
             network_setup_scripts, network_teardown_scripts)
         self.service_manager.start_service(unit_name)
+        self.service_manager.enable_service(unit_name)
 
         logging.info(f'Started VM "{vm_id}"')
         yield {
