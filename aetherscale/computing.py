@@ -1,4 +1,3 @@
-import enum
 import logging
 import json
 import os
@@ -8,12 +7,16 @@ import psutil
 import random
 import re
 import shlex
+import shutil
 import string
 import subprocess
 import sys
 import tempfile
 from typing import List, Optional, Dict, Any, Callable, Tuple, Iterator
 
+from aetherscale.paths import \
+    user_image_path, qemu_socket_monitor, qemu_socket_guest_agent, \
+    resource_config_path, ResourceType
 from . import networking
 from .qemu import image, runtime
 from .qemu.exceptions import QemuException
@@ -35,18 +38,6 @@ RADVD_SERVICE_NAME = 'aetherscale-radvd.service'
 logging.basicConfig(level=config.LOG_LEVEL)
 
 
-def user_image_path(vm_id: str) -> Path:
-    return config.USER_IMAGE_FOLDER / f'{vm_id}.qcow2'
-
-
-def qemu_socket_monitor(vm_id: str) -> Path:
-    return Path(f'/tmp/aetherscale-qmp-{vm_id}.sock')
-
-
-def qemu_socket_guest_agent(vm_id: str) -> Path:
-    return Path(f'/tmp/aetherscale-qga-{vm_id}.sock')
-
-
 def create_user_image(vm_id: str, image_name: str) -> Path:
     base_image = config.BASE_IMAGE_FOLDER / f'{image_name}.qcow2'
     if not base_image.is_file():
@@ -61,23 +52,6 @@ def create_user_image(vm_id: str, image_name: str) -> Path:
         raise QemuException(f'Could not create image for VM "{vm_id}"')
 
     return user_image
-
-
-class ResourceType(enum.Enum):
-    VM = enum.auto()
-    VPN = enum.auto()
-
-
-def resource_config_path(
-        resource_type: ResourceType, resource_name: str) -> Path:
-    if resource_type == ResourceType.VM:
-        resource_folder = 'vm'
-    elif resource_type == ResourceType.VPN:
-        resource_folder = 'vpn'
-    else:
-        raise ValueError(f'Unknown resource type {resource_type}')
-
-    return config.AETHERSCALE_CONFIG_DIR / resource_folder / resource_name
 
 
 def setup_script_path(resource_folder: Path, tap_name: str) -> Path:
@@ -339,6 +313,10 @@ class ComputingHandler:
 
         self.service_manager.uninstall_service(unit_name)
         user_image.unlink()
+
+        # once we delete the VM, we don't need its setup scripts anymore
+        resource_folder = resource_config_path(ResourceType.VM, vm_id)
+        shutil.rmtree(resource_folder)
 
         yield {
             'status': 'deleted',
