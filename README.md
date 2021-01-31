@@ -78,7 +78,7 @@ program, it feels too heavy for a proof-of-concept tool.
 Each VM is booted from a base image, which has to be created in advance.
 This means that at first you have to create a base image. Download an
 installation ISO for your favourite Linux distribution and install it to a
-qcow2 file with the following command, following the installation instruction
+qcow2 file with the following commands, following the installation instruction
 inside the started QEMU VM.
 
 ```bash
@@ -91,24 +91,45 @@ qemu-system-x86_64 -cpu host -accel kvm -m 4096 -hda $BASE_IMAGE -cdrom $ISO
 The qcow2 is your base image. It must be located inside the
 `$BASE_IMAGE_FOLDER` directory. This is a configurable environment variable.
 
-aetherscale expects a bridge network on the physical ethernet which can be
-used to attach additional TAP interfaces for VMs. If this interface does not
+aetherscale expects a bridge network `br0` on the physical ethernet which can
+be used to attach additional TAP interfaces for VMs. If this interface does not
 exist, an error will be displayed on startup of the server.
 
-Once the server is running, you can start a VM with:
+aetherscale comes with an included HTTP server. While our HTTP implementation
+does not allow scaling to multiple machines it simplifies the first steps. You
+can start the HTTP server with:
 
 ```bash
-aetherscale-cli create-vm --image base-image-name
+aetherscale http
 ```
 
-The base image must exist as `$BASE_IMAGE_FOLDER/some-base-image-name.qcow2`.
-You can configure the environment variable `$BASE_IMAGE_FOLDER` to any folder.
-
-You can then list all running VMs with:
+Once the server is running (on localhost port 5000 in this example) you can
+create a new VM from the previously created base image and list all
+VMs with:
 
 ```bash
-aetherscale-cli list-vms
+curl -XPOST -H "Content-Type: application/json" \
+    -d '{"image": "ubuntu-20.04.1-server-amd64"}' http://localhost:5000/vm
+curl http://localhost:5000/vm
 ```
+
+The base image must exist as
+`$BASE_IMAGE_FOLDER/ubuntu-20.04.1-server-amd64.qcow2`.
+
+You can also stop a running VM and start a stopped VM by `PATCH`'ing the
+VM's REST endpoint with the desired status:
+
+```bash
+curl -XPATCH -H "Content-Type: application/json" \
+    -d '{"status": "stopped"}' http://localhost:5000/vm/adbvzwdf
+
+curl -XPATCH -H "Content-Type: application/json" \
+    -d '{"status": "started"}' http://localhost:5000/vm/adbvzwdf
+```
+
+Please note that stopping a VM (gracefully) takes some time, so you cannot
+start it immediately after you have issued a stop request.
+
 
 ## Run Tests
 
@@ -193,23 +214,6 @@ TODOs for VPN networking:
 - TODO: Rename prefix to `vpn` instead of `network`
 - TODO: Structure files into subfolders, e.g. `CONFIG/vpn/vpn-abc/setup.sh`?
 
-
-### Messages
-
-Create a new machine:
-
-```json
-{
-   "component": "computing",
-   "task": "create-vm",
-   "response-channel": "unique-channel-123456789",
-   "options": {
-      "image": "my-image",
-      "virtual-network": "my-virtual-subnet",
-      "public-ip": true,
-   }
-}
-```
 
 ### Computing
 

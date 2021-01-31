@@ -10,6 +10,7 @@ with open('README.md', 'rb') as f:
     long_descr = f.read().decode('utf-8')
 
 install_requires = [
+    'flask',
     'pika',
     'psutil',
 ]
@@ -18,7 +19,9 @@ setup(
     name='aetherscale',
     packages=[
         'aetherscale',
+        'aetherscale.api',
         'aetherscale.qemu',
+        'aetherscale.vpn',
     ],
     entry_points={
         'console_scripts': [
