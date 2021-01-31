@@ -1,7 +1,7 @@
 # aetherscale
 
 aetherscale is small hobby project to create a hosting environment that can
-be controlled via a programmable API. I just want to have some fun and
+be controlled with an API. I just want to have some fun and
 dive deeper into Linux tooling (networking, virtualization and so on) and
 into distributed applications. I do not think that this will become
 production-ready at any point.
