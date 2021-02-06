@@ -428,9 +428,7 @@ class ComputingHandler:
             logging.info(f'Creating VPN {vpn_name} for VM {vm_id}')
 
             vpn_port = self.available_vpn_ports.pop()
-            vpn = TincVirtualNetwork(
-                vpn_name, config.VPN_CONFIG_FOLDER, vpn_port,
-                self.service_manager)
+            vpn = TincVirtualNetwork(vpn_name, vpn_port, self.service_manager)
             vpn.create_config(config.HOSTNAME)
             vpn.gen_keypair()
 
