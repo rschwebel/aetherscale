@@ -56,7 +56,6 @@ def update_vm_status(vm_id):
     handler: ComputingHandler = flask.g.handler
 
     if data['status'] == 'started':
-        dbg = handler.start_vm({'vm-id': vm_id})
         result = list(handler.start_vm({'vm-id': vm_id}))[0]
     elif data['status'] == 'stopped':
         result = list(handler.stop_vm({'vm-id': vm_id}))[0]
