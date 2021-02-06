@@ -31,7 +31,7 @@ def vm_info(vm_id):
     try:
         result = list(handler.vm_info({'vm-id': vm_id}))[0]
     except RuntimeError:
-        return 'VM does not exist', 400
+        return 'VM does not exist', 404
 
     return flask.jsonify(result)
 
