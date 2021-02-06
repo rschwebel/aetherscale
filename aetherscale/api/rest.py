@@ -91,8 +91,3 @@ def vpn_info(vpn_name):
         return 'VPN does not exist', 404
 
     return flask.jsonify(result)
-
-
-def run():
-    # TODO: Only needed for debugging, production applications must use WSGI
-    app.run()

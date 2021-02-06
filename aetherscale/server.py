@@ -23,6 +23,6 @@ def main():
         sys.exit(1)
 
     elif len(sys.argv) >= 2 and sys.argv[1] == 'http':
-        aetherscale.api.rest.run()
+        aetherscale.api.rest.app.run()
     else:
         aetherscale.api.broker.run()
