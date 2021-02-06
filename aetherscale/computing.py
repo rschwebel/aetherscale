@@ -85,7 +85,7 @@ class ComputingHandler:
         self.radvd = radvd
         self.service_manager = service_manager
 
-        self.established_vpns: Dict[str, TincVirtualNetwork] = {}
+        self.established_vpns = self._load_existing_vpns()
         self.available_vpn_ports = config.VPN_PORTS
 
     def list_vms(self, _: Dict[str, Any]) -> Iterator[List[Dict[str, Any]]]:
@@ -337,6 +337,24 @@ class ComputingHandler:
             'vm-id': vm_id,
         }
 
+    def list_vpns(self, _: Dict[str, Any]) -> Iterator[List[str]]:
+        yield [vpn.netname for vpn in self.established_vpns.values()]
+
+    def vpn_info(self, options: Dict[str, Any]) -> Iterator[List[str]]:
+        try:
+            vpn_name = options['vpn-name']
+        except KeyError:
+            raise ValueError('VPN name not specified')
+
+        if vpn_name not in self.established_vpns:
+            raise KeyError(f'VPN "{vpn_name}" does not exist')
+
+        vpn = self.established_vpns[vpn_name]
+
+        yield {
+            'vpn-name': vpn.netname,
+        }
+
     def _create_qemu_systemd_unit(
             self, unit_name: str, qemu_config: runtime.QemuStartupConfig,
             setup_scripts: List[Path], teardown_scripts: List[Path]):
@@ -398,7 +416,10 @@ class ComputingHandler:
         os.remove(f.name)
 
     def _establish_vpn(self, vpn_name: str, vm_id: str) -> str:
-        vpn_network_prefix = self.radvd.generate_prefix()
+        if self.radvd:
+            vpn_network_prefix = self.radvd.generate_prefix()
+        else:
+            vpn_network_prefix = config.VPN_48_PREFIX + ':0000::/64'
 
         if vpn_name in self.established_vpns:
             # TODO: Established VPNs should be restored after daemon re-start
@@ -433,12 +454,13 @@ class ComputingHandler:
             self.established_vpns[vpn_name] = vpn
 
             # Setup radvd for IPv6 auto-configuration
-            self.radvd.add_interface(
-                vpn.bridge_interface_name, vpn_network_prefix)
-            self.service_manager.restart_service(RADVD_SERVICE_NAME)
-            logging.debug(
-                f'Added device {vpn.bridge_interface_name} to radvd '
-                f'with IPv6 address range {vpn_network_prefix}')
+            if self.radvd:
+                self.radvd.add_interface(
+                    vpn.bridge_interface_name, vpn_network_prefix)
+                self.service_manager.restart_service(RADVD_SERVICE_NAME)
+                logging.debug(
+                    f'Added device {vpn.bridge_interface_name} to radvd '
+                    f'with IPv6 address range {vpn_network_prefix}')
 
         # Create a new tap device for the VM to use
         associated_tap_device = 'vpn-' + vm_id
@@ -453,6 +475,29 @@ class ComputingHandler:
 
     def _exhaust(self, generator):
         all(generator)
+
+    def _load_existing_vpns(self) -> Dict[str, TincVirtualNetwork]:
+        vpns = {}
+
+        for folder in (config.AETHERSCALE_CONFIG_DIR / 'vpn').iterdir():
+            logging.debug(f'Loading existing VPN "{folder.name}"')
+
+            netname = folder.name
+
+            port = 0
+            vpn_folder = config.AETHERSCALE_CONFIG_DIR / 'vpn' / netname
+            tinc_conf = vpn_folder / 'tinc/tinc.conf'
+            with open(tinc_conf) as f:
+                for line in f:
+                    m = re.match(r'Port\s*=\s*(\d+)', line)
+                    if m:
+                        port = int(m.group(1))
+
+            if port > 0:
+                vpns[netname] = TincVirtualNetwork(
+                    netname, port, self.service_manager)
+
+        return vpns
 
 
 def get_process_for_vm(vm_id: str) -> Optional[psutil.Process]:

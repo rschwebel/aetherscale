@@ -18,14 +18,12 @@ class VpnException(Exception):
 
 class TincVirtualNetwork(object):
     def __init__(
-            self, netname: str, config_folder: Path, port: int,
-            service_manager: ServiceManager):
+            self, netname: str, port: int, service_manager: ServiceManager):
         if not self._validate_netname(netname):
             raise ValueError(
                 f'Invalid name for network provided ("{netname}")')
 
         self.netname = netname
-        self.config_base_folder = config_folder
         self.service_manager = service_manager
         self.port = port
 

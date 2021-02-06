@@ -74,6 +74,25 @@ def delete_vm(vm_id):
     return flask.jsonify(result)
 
 
+@app.route('/vpn', methods=['GET'])
+def list_vpns():
+    handler: ComputingHandler = flask.g.handler
+    result = list(handler.list_vpns({}))[0]
+
+    return flask.jsonify(result)
+
+
+@app.route('/vpn/<vpn_name>', methods=['GET'])
+def vpn_info(vpn_name):
+    handler: ComputingHandler = flask.g.handler
+    try:
+        result = list(handler.vpn_info({'vpn-name': vpn_name}))[0]
+    except KeyError:
+        return 'VPN does not exist', 404
+
+    return flask.jsonify(result)
+
+
 def run():
     # TODO: Only needed for debugging, production applications must use WSGI
     app.run()
