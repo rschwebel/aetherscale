@@ -49,6 +49,10 @@ def test_vm_lifecycle(tmppath, mock_service_manager: ServiceManager):
             assert mock_service_manager.service_is_running(service_name)
             assert list_results[0][0]['vm-id'] == vm_id
 
+            vm_info = list(handler.vm_info({'vm-id': vm_id}))[0]
+            assert vm_info['vm-id'] == vm_id
+            assert vm_info['status'] == 'running'
+
             # TODO: Test graceful stop, needs mock of QemuMonitor
             results = list(handler.stop_vm({'vm-id': vm_id, 'kill': True}))
             list_results = list(handler.list_vms({}))

@@ -23,6 +23,13 @@ def test_list_vms(handler, client):
 
 
 @mock.patch('aetherscale.api.rest.ComputingHandler')
+def test_show_vm_info(handler, client):
+    handler.return_value.vm_info.return_value = [{'vm-id': 'abc123'}]
+    rv = client.get('/vm/abc123')
+    assert rv.json['vm-id'] == 'abc123'
+
+
+@mock.patch('aetherscale.api.rest.ComputingHandler')
 def test_create_vm(handler, client):
     client.post(
         '/vm', data=json.dumps({'image': 'dummy-image'}),

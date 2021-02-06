@@ -146,6 +146,27 @@ class ComputingHandler:
 
         yield vms
 
+    def vm_info(self, options: Dict[str, Any]) -> Iterator[Dict[str, str]]:
+        try:
+            vm_id = options['vm-id']
+        except KeyError:
+            raise ValueError('VM ID not specified')
+
+        unit_name = systemd_unit_name_for_vm(vm_id)
+        if not self.service_manager.service_exists(unit_name):
+            raise RuntimeError('VM does not exist')
+
+        # TODO: Distinguish better between status, define good lifecycle
+        if self.service_manager.service_is_running(unit_name):
+            status = 'running'
+        else:
+            status = 'stopped'
+
+        yield {
+            'vm-id': vm_id,
+            'status': status,
+        }
+
     def create_vm(self, options: Dict[str, Any]) -> Iterator[Dict[str, str]]:
         vm_id = ''.join(
             random.choice(string.ascii_lowercase) for _ in range(8))

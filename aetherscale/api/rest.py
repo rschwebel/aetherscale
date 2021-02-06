@@ -24,6 +24,18 @@ def list_vms():
     return flask.jsonify(result)
 
 
+@app.route('/vm/<vm_id>', methods=['GET'])
+def vm_info(vm_id):
+    handler: ComputingHandler = flask.g.handler
+
+    try:
+        result = list(handler.vm_info({'vm-id': vm_id}))[0]
+    except RuntimeError:
+        return 'VM does not exist', 400
+
+    return flask.jsonify(result)
+
+
 @app.route('/vm', methods=['POST'])
 def create_vm():
     options = flask.request.json
