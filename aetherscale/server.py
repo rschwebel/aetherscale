@@ -3,7 +3,7 @@ import sys
 from aetherscale import __version__
 from aetherscale import dependencies
 import aetherscale.computing
-import aetherscale.api.flask
+import aetherscale.api.rest
 
 
 def main():
@@ -16,6 +16,6 @@ def main():
         help_text = dependencies.build_dependency_help_text(missing_deps)
         print(help_text, file=sys.stderr)
     elif len(sys.argv) >= 2 and sys.argv[1] == 'http':
-        aetherscale.api.flask.run()
+        aetherscale.api.rest.run()
     else:
         aetherscale.computing.run()

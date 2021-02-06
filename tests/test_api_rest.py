@@ -2,16 +2,16 @@ import json
 from unittest import mock
 import pytest
 
-import aetherscale.api.flask
+import aetherscale.api.rest
 
 
 @pytest.fixture
 def client():
-    with aetherscale.api.flask.app.test_client() as client:
+    with aetherscale.api.rest.app.test_client() as client:
         return client
 
 
-@mock.patch('aetherscale.api.flask.ComputingHandler')
+@mock.patch('aetherscale.api.rest.ComputingHandler')
 def test_list_vms(handler, client):
     handler.return_value.list_vms.return_value = [[]]
     rv = client.get('/vm')
@@ -22,7 +22,7 @@ def test_list_vms(handler, client):
     assert len(rv.json) == 1
 
 
-@mock.patch('aetherscale.api.flask.ComputingHandler')
+@mock.patch('aetherscale.api.rest.ComputingHandler')
 def test_create_vm(handler, client):
     client.post(
         '/vm', data=json.dumps({'image': 'dummy-image'}),
@@ -31,13 +31,13 @@ def test_create_vm(handler, client):
     handler.return_value.create_vm.assert_called_with({'image': 'dummy-image'})
 
 
-@mock.patch('aetherscale.api.flask.ComputingHandler')
+@mock.patch('aetherscale.api.rest.ComputingHandler')
 def test_delete_vm(handler, client):
     client.delete('/vm/my-vm-id')
     handler.return_value.delete_vm.assert_called_with({'vm-id': 'my-vm-id'})
 
 
-@mock.patch('aetherscale.api.flask.ComputingHandler')
+@mock.patch('aetherscale.api.rest.ComputingHandler')
 def test_start_vm(handler, client):
     handler.return_value.start_vm.return_value = [[
         {'vm-id': 'my-vm-id', 'status': 'started'},
@@ -54,7 +54,7 @@ def test_start_vm(handler, client):
     assert rv.status_code == 400
 
 
-@mock.patch('aetherscale.api.flask.ComputingHandler')
+@mock.patch('aetherscale.api.rest.ComputingHandler')
 def test_stop_vm(handler, client):
     handler.return_value.stop_vm.return_value = [[
         {'vm-id': 'my-vm-id', 'status': 'stopped'},
