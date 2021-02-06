@@ -15,10 +15,6 @@ BINARY_DEPENDENCIES = {
         'QEMU is required by aetherscale. You can install it:\n\n'
         '    On Ubuntu: apt install qemu-utils qemu-kvm\n'
         '    On Arch Linux: pacman -S qemu-headless',
-    'vde_switch':
-        'VDE2 is required by aetherscale. You can install it:\n\n'
-        '    On Ubuntu: apt install vde2\n'
-        '    On Arch Linux: pacman -S vde2'
 }
 
 
