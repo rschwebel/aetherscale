@@ -128,7 +128,7 @@ def run():
 
     handler = ComputingHandler(radvd, service_manager)
 
-    bound_callback = lambda ch, method, properties, body: \
+    def bound_callback(ch, method, properties, body):
         callback(ch, method, properties, body, handler)
     channel.basic_consume(
         queue=exclusive_queue_name, on_message_callback=bound_callback)
