@@ -37,7 +37,7 @@ def guestmount(image_path: Path) -> Iterator[Path]:
         # thus we have to wait until write-lock is released, but at most k
         # seconds
         with aetherscale.timing.timeout(seconds=5):
-            logging.debug(f'Waiting for write lock to get released')
+            logging.debug('Waiting for write lock to get released')
 
             access_ok = False
             while not access_ok:
@@ -53,7 +53,7 @@ def install_startup_script(script_source: str, mount_dir: Path):
         create_systemd_startup_unit(f, Path(f'/root/{STARTUP_FILENAME}.sh'))
 
     multi_user_target_path = \
-        mount_dir / f'etc/systemd/system/multi-user.target.wants'
+        mount_dir / 'etc/systemd/system/multi-user.target.wants'
     multi_user_target_path.mkdir(parents=True, exist_ok=True)
 
     with tempfile.NamedTemporaryFile('wt') as startup_script:
