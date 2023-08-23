@@ -12,5 +12,3 @@ def run_command_chain(commands: Iterator[List[str]]) -> bool:
             return False
 
     return True
-
-
