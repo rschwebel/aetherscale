@@ -57,8 +57,12 @@ def test_start_vm(handler, client):
     handler.return_value.start_vm.assert_called_with({'vm-id': 'my-vm-id'})
 
     # missing message must lead to error
-    rv = client.patch('/vm/my-vm-id')
+    rv = client.patch('/vm/my-vm-id', content_type='application/json')
     assert rv.status_code == 400
+
+    # wrong content type must result in an 415 UNSUPPORTED MEDIA TYPE
+    rv = client.patch('/vm/my-vm-id')
+    assert rv.status_code == 415
 
 
 @mock.patch('aetherscale.api.rest.ComputingHandler')
@@ -74,5 +78,9 @@ def test_stop_vm(handler, client):
     handler.return_value.stop_vm.assert_called_with({'vm-id': 'my-vm-id'})
 
     # missing message must lead to error
-    rv = client.patch('/vm/my-vm-id')
+    rv = client.patch('/vm/my-vm-id', content_type='application/json')
     assert rv.status_code == 400
+
+    # wrong content type must result in an 415 UNSUPPORTED MEDIA TYPE
+    rv = client.patch('/vm/my-vm-id')
+    assert rv.status_code == 415
