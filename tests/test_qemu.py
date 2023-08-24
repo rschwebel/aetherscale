@@ -89,7 +89,7 @@ def test_timeout(timeout):
     # because it expects to receive a welcome capabilities message from the
     # server
 
-    with run_mock_qemu_server(str(sock_file), QemuProtocol.QGA) as mock_server:
+    with run_mock_qemu_server(str(sock_file), QemuProtocol.QGA) as mock_server:  # noqa: F841
         with timeout(1):  # if function does not finish after 1s, error-out
             with pytest.raises(socket.timeout):
                 QemuMonitor(sock_file, QemuProtocol.QMP, timeout=0.1)
